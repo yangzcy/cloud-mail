@@ -22,6 +22,8 @@ export async function init() {
     i18n.global.locale.value = settingStore.lang
 
     let setting = null;
+    settingStore.lang = 'zh'
+    i18n.global.locale.value = 'zh'
 
     if (token) {
         const userPromise = loginUserInfo().catch(e => {
