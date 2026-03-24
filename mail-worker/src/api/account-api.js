@@ -8,6 +8,11 @@ app.get('/account/list', async (c) => {
 	return c.json(result.ok(list));
 });
 
+app.get('/account/selectableIds', async (c) => {
+	const ids = await accountService.selectableIds(c, userContext.getUserId(c));
+	return c.json(result.ok(ids));
+});
+
 app.delete('/account/delete', async (c) => {
 	await accountService.delete(c, c.req.query(), userContext.getUserId(c));
 	return c.json(result.ok());

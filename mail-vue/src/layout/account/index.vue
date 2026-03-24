@@ -3,9 +3,22 @@
     <div class="head-opt">
       <Icon v-perm="'account:add'" class="icon add" icon="ion:add-outline" width="23" height="23" @click="add"/>
       <Icon v-if="hasPerm('account:delete')" class="icon refresh" :icon="batchMode ? 'mdi:checkbox-multiple-marked-outline' : 'mdi:checkbox-multiple-blank-outline'" width="20" height="20" @click="toggleBatchMode"/>
-      <Icon v-if="batchMode && hasPerm('account:delete')" class="icon refresh" icon="uiw:delete" width="16" height="16" @click="batchRemove"/>
+      <div v-if="batchMode && hasPerm('account:delete')" class="batch-toolbar">
+        <button class="batch-pill" :disabled="selectableAccountIds.length === 0" @click="selectCurrentList">
+          {{ t('selectCurrentList') }}
+        </button>
+        <button class="batch-pill" :disabled="selectableAccountIds.length === 0 || selectAllMode" @click="selectAllAccounts">
+          {{ t('selectAllAccounts') }}
+        </button>
+        <button class="batch-pill" :disabled="selectedAccountIds.length === 0" @click="clearSelectedAccounts">
+          {{ t('clearSelection') }}
+        </button>
+        <div class="batch-count">{{ selectedCountText }}</div>
+        <button class="batch-pill danger" :disabled="selectedAccountIds.length === 0" @click="batchRemove">
+          {{ t('delete') }}
+        </button>
+      </div>
       <Icon class="icon refresh" icon="ion:reload" width="18" height="18" @click="refresh"/>
-      <div v-if="batchMode" class="batch-count">{{ t('selectedCount', {msg: selectedAccountIds.length}) }}</div>
     </div>
     <el-scrollbar class="scrollbar" ref="scrollbarRef">
       <div v-infinite-scroll="getAccountList" :infinite-scroll-distance="600" :infinite-scroll-immediate="false">
@@ -133,9 +146,10 @@
 </template>
 <script setup>
 import {Icon} from "@iconify/vue";
-import {nextTick, reactive, ref, watch} from "vue";
+import {computed, nextTick, reactive, ref, watch} from "vue";
 import {
   accountList,
+  accountSelectableIds,
   accountAdd,
   accountDelete,
   accountSetName,
@@ -172,6 +186,7 @@ const addRef = ref({})
 const scrollbarRef = ref({})
 const batchMode = ref(false)
 const selectedAccountIds = ref([])
+const selectAllMode = ref(false)
 let account = null
 let turnstileId = null
 const botJsError = ref(false)
@@ -306,6 +321,14 @@ function canBatchSelect(account) {
   return account.accountId !== userStore.user.account.accountId
 }
 
+const selectableAccountIds = computed(() => accounts.filter(canBatchSelect).map(item => item.accountId))
+const selectedCountText = computed(() => {
+  if (selectAllMode.value) {
+    return t('allAccountsSelected', { msg: selectedAccountIds.value.length })
+  }
+  return t('selectedCount', { msg: selectedAccountIds.value.length })
+})
+
 function isSelected(accountId) {
   return selectedAccountIds.value.includes(accountId)
 }
@@ -318,17 +341,43 @@ function toggleSelectedAccount(accountId) {
 
   if (isSelected(accountId)) {
     selectedAccountIds.value = selectedAccountIds.value.filter(id => id !== accountId)
+    selectAllMode.value = false
     return
   }
 
   selectedAccountIds.value = [...selectedAccountIds.value, accountId]
+  selectAllMode.value = false
+}
+
+function blurAction(event) {
+  event?.currentTarget?.blur?.()
 }
 
 function toggleBatchMode() {
   batchMode.value = !batchMode.value
   if (!batchMode.value) {
     selectedAccountIds.value = []
+    selectAllMode.value = false
   }
+}
+
+function selectCurrentList(event) {
+  blurAction(event)
+  selectedAccountIds.value = [...selectableAccountIds.value]
+  selectAllMode.value = false
+}
+
+async function selectAllAccounts(event) {
+  blurAction(event)
+  const ids = await accountSelectableIds()
+  selectedAccountIds.value = ids
+  selectAllMode.value = true
+}
+
+function clearSelectedAccounts(event) {
+  blurAction(event)
+  selectedAccountIds.value = []
+  selectAllMode.value = false
 }
 
 function handleAccountClick(account) {
@@ -349,26 +398,35 @@ function resetCurrentAccountIfDeleted(accountIds) {
   accountStore.currentAccount = fallbackAccount
 }
 
-function batchRemove() {
+function batchRemove(event) {
+  blurAction(event)
   if (selectedAccountIds.value.length === 0) {
     return
   }
 
-  ElMessageBox.confirm(t('delEmailsConfirm'), {
+  ElMessageBox.confirm(t('delAccountsConfirm', { msg: selectedAccountIds.value.length }), {
     confirmButtonText: t('confirm'),
     cancelButtonText: t('cancel'),
     type: 'warning'
   }).then(() => {
     accountDelete(selectedAccountIds.value).then(() => {
-      resetCurrentAccountIfDeleted(selectedAccountIds.value)
+      const deletingIds = [...selectedAccountIds.value]
+      resetCurrentAccountIfDeleted(deletingIds)
       toggleBatchMode()
+      const removableIdSet = new Set(deletingIds)
+      for (let i = accounts.length - 1; i >= 0; i--) {
+        if (removableIdSet.has(accounts[i].accountId)) {
+          accounts.splice(i, 1)
+        }
+      }
       refresh()
       emailStore.emailScroll?.refreshList()
       emailStore.sendScroll?.refreshList()
-      ElMessage({
-        message: t('delSuccessMsg'),
+      ElNotification({
+        title: t('delete'),
+        message: t('delAccountsSuccess', { msg: deletingIds.length }),
         type: 'success',
-        plain: true,
+        duration: 2600,
       })
     })
   });
@@ -376,7 +434,7 @@ function batchRemove() {
 
 
 function remove(account) {
-  ElMessageBox.confirm(t('delConfirm', {msg: account.email}), {
+  ElMessageBox.confirm(t('delOneAccountConfirm', {msg: account.email}), {
     confirmButtonText: t('confirm'),
     cancelButtonText: t('cancel'),
     type: 'warning'
@@ -388,10 +446,11 @@ function remove(account) {
       if (accounts.length < queryParams.size) {
         getAccountList()
       }
-      ElMessage({
-        message: t('delSuccessMsg'),
+      ElNotification({
+        title: t('delete'),
+        message: t('delOneAccountSuccess'),
         type: 'success',
-        plain: true,
+        duration: 2400,
       })
     })
   });
@@ -402,6 +461,7 @@ function refresh() {
     return
   }
   selectedAccountIds.value = []
+  selectAllMode.value = false
   loading.value = false
   followLoading.value = false
   noLoading.value = false
@@ -591,7 +651,8 @@ path[fill="#ffdda1"] {
 </style>
 <style scoped lang="scss">
 .account-box {
-
+  display: flex;
+  flex-direction: column;
   border-right: 1px solid var(--el-border-color) !important;
   background-color: var(--el-bg-color);
   height: 100%;
@@ -600,23 +661,69 @@ path[fill="#ffdda1"] {
   .head-opt {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     height: 38px;
     box-shadow: var(--header-actions-border);
     padding-left: 10px;
     padding-right: 10px;
+    row-gap: 6px;
 
     .icon {
       cursor: pointer;
     }
 
     .batch-count {
-      margin-left: auto;
       font-size: 12px;
       color: var(--secondary-text-color);
+      white-space: nowrap;
+      padding: 0 4px;
     }
 
     .refresh {
       margin-left: 10px;
+    }
+
+    .batch-toolbar {
+      display: inline-flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-left: 10px;
+    }
+
+    .batch-pill {
+      border: 1px solid var(--el-border-color);
+      background: var(--el-fill-color-light);
+      color: var(--el-text-color-primary);
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 12px;
+      line-height: 1;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .batch-pill:hover:not(:disabled) {
+      background: var(--el-fill-color);
+      border-color: var(--el-color-primary-light-5);
+      color: var(--el-color-primary);
+    }
+
+    .batch-pill.danger {
+      background: color-mix(in srgb, var(--el-color-danger-light-9) 88%, white);
+      border-color: var(--el-color-danger-light-5);
+      color: var(--el-color-danger);
+    }
+
+    .batch-pill.danger:hover:not(:disabled) {
+      background: var(--el-color-danger-light-8);
+      border-color: var(--el-color-danger-light-3);
+      color: var(--el-color-danger-dark-2);
+    }
+
+    .batch-pill:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
     }
 
     .add {
@@ -626,15 +733,29 @@ path[fill="#ffdda1"] {
     .head-opt:not(.add) .refresh {
       margin-left: 5px;
     }
+
+    @media (max-width: 767px) {
+      height: auto;
+      min-height: 38px;
+      padding-top: 8px;
+      padding-bottom: 8px;
+
+      .batch-toolbar {
+        width: 100%;
+        margin-left: 0;
+      }
+
+      .refresh {
+        margin-left: auto;
+      }
+    }
   }
 
   .scrollbar {
     width: 100%;
-    height: calc(100% - 38px);
+    flex: 1;
+    min-height: 0;
     overflow: auto;
-    @media (max-width: 767px) {
-      height: calc(100% - 98px);
-    }
 
     .empty {
       display: flex;

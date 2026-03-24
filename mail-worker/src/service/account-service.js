@@ -166,6 +166,21 @@ const accountService = {
 			.all();
 	},
 
+	async selectableIds(c, userId) {
+		const user = await userService.selectById(c, userId);
+		const rows = await orm(c)
+			.select({ accountId: account.accountId })
+			.from(account)
+			.where(and(
+				eq(account.userId, userId),
+				eq(account.isDel, isDel.NORMAL),
+				ne(account.email, user.email)
+			))
+			.all();
+
+		return rows.map(item => item.accountId);
+	},
+
 	async delete(c, params, userId) {
 
 		const user = await userService.selectById(c, userId);
@@ -195,7 +210,8 @@ const accountService = {
 			throw new BizError(t('noUserAccount'));
 		}
 
-		await orm(c).update(account).set({ isDel: isDel.DELETE }).where(
+		await emailService.physicsDeleteByAccountIds(c, accountIds);
+		await orm(c).delete(account).where(
 			and(
 				eq(account.userId, userId),
 				inArray(account.accountId, accountIds)
