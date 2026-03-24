@@ -38,6 +38,7 @@ export function userAllAccount(userId, num, size) {
     return http.get('/user/allAccount', {params:{userId,num,size}})
 }
 
-export function userDeleteAccount(accountId) {
-    return http.delete('/user/deleteAccount', {params:{accountId}})
+export function userDeleteAccount(accountIds) {
+    const ids = Array.isArray(accountIds) ? accountIds.join(',') : accountIds
+    return http.delete('/user/deleteAccount', {params:{accountIds: ids}})
 }

@@ -2,16 +2,22 @@
   <div class="account-box">
     <div class="head-opt">
       <Icon v-perm="'account:add'" class="icon add" icon="ion:add-outline" width="23" height="23" @click="add"/>
+      <Icon v-if="hasPerm('account:delete')" class="icon refresh" :icon="batchMode ? 'mdi:checkbox-multiple-marked-outline' : 'mdi:checkbox-multiple-blank-outline'" width="20" height="20" @click="toggleBatchMode"/>
+      <Icon v-if="batchMode && hasPerm('account:delete')" class="icon refresh" icon="uiw:delete" width="16" height="16" @click="batchRemove"/>
       <Icon class="icon refresh" icon="ion:reload" width="18" height="18" @click="refresh"/>
+      <div v-if="batchMode" class="batch-count">{{ t('selectedCount', {msg: selectedAccountIds.length}) }}</div>
     </div>
     <el-scrollbar class="scrollbar" ref="scrollbarRef">
       <div v-infinite-scroll="getAccountList" :infinite-scroll-distance="600" :infinite-scroll-immediate="false">
         <el-card class="item" :class="itemBg(item.accountId)" v-for="(item, index) in accounts" :key="item.accountId"
-                 @click="changeAccount(item)">
+                 @click="handleAccountClick(item)">
           <div class="account">
+            <div v-if="batchMode" class="batch-check" @click.stop="toggleSelectedAccount(item.accountId)">
+              <el-checkbox :model-value="isSelected(item.accountId)" :disabled="!canBatchSelect(item)" />
+            </div>
             {{ item.email }}
           </div>
-          <div class="opt">
+          <div class="opt" v-if="!batchMode">
             <div class="send-email" @click.stop>
               <Icon @click="setAllReceive(item)" v-if="!item.allReceive" icon="eva:email-fill" width="22" height="22" color="#fccb1a"/>
               <Icon @click="setAllReceive(item)" v-else icon="flat-color-icons:folder" width="22" height="22" color="#23c4f1" />
@@ -164,6 +170,8 @@ const setNameLoading = ref(false)
 const accountName = ref(null)
 const addRef = ref({})
 const scrollbarRef = ref({})
+const batchMode = ref(false)
+const selectedAccountIds = ref([])
 let account = null
 let turnstileId = null
 const botJsError = ref(false)
@@ -294,6 +302,77 @@ function itemBg(accountId) {
   return accountStore.currentAccountId === accountId ? 'item-choose' : ''
 }
 
+function canBatchSelect(account) {
+  return account.accountId !== userStore.user.account.accountId
+}
+
+function isSelected(accountId) {
+  return selectedAccountIds.value.includes(accountId)
+}
+
+function toggleSelectedAccount(accountId) {
+  const account = accounts.find(item => item.accountId === accountId)
+  if (!account || !canBatchSelect(account)) {
+    return
+  }
+
+  if (isSelected(accountId)) {
+    selectedAccountIds.value = selectedAccountIds.value.filter(id => id !== accountId)
+    return
+  }
+
+  selectedAccountIds.value = [...selectedAccountIds.value, accountId]
+}
+
+function toggleBatchMode() {
+  batchMode.value = !batchMode.value
+  if (!batchMode.value) {
+    selectedAccountIds.value = []
+  }
+}
+
+function handleAccountClick(account) {
+  if (batchMode.value) {
+    toggleSelectedAccount(account.accountId)
+    return
+  }
+  changeAccount(account)
+}
+
+function resetCurrentAccountIfDeleted(accountIds) {
+  if (!accountIds.includes(accountStore.currentAccountId)) {
+    return
+  }
+
+  const fallbackAccount = accounts.find(item => !accountIds.includes(item.accountId)) || userStore.user.account
+  accountStore.currentAccountId = fallbackAccount.accountId
+  accountStore.currentAccount = fallbackAccount
+}
+
+function batchRemove() {
+  if (selectedAccountIds.value.length === 0) {
+    return
+  }
+
+  ElMessageBox.confirm(t('delEmailsConfirm'), {
+    confirmButtonText: t('confirm'),
+    cancelButtonText: t('cancel'),
+    type: 'warning'
+  }).then(() => {
+    accountDelete(selectedAccountIds.value).then(() => {
+      resetCurrentAccountIfDeleted(selectedAccountIds.value)
+      toggleBatchMode()
+      refresh()
+      emailStore.emailScroll?.refreshList()
+      emailStore.sendScroll?.refreshList()
+      ElMessage({
+        message: t('delSuccessMsg'),
+        type: 'success',
+        plain: true,
+      })
+    })
+  });
+}
 
 
 function remove(account) {
@@ -303,6 +382,7 @@ function remove(account) {
     type: 'warning'
   }).then(() => {
     accountDelete(account.accountId).then(() => {
+      resetCurrentAccountIfDeleted([account.accountId])
       const index = accounts.findIndex(item => item.accountId === account.accountId);
       accounts.splice(index, 1);
       if (accounts.length < queryParams.size) {
@@ -321,6 +401,7 @@ function refresh() {
   if (loading.value) {
     return
   }
+  selectedAccountIds.value = []
   loading.value = false
   followLoading.value = false
   noLoading.value = false
@@ -528,6 +609,12 @@ path[fill="#ffdda1"] {
       cursor: pointer;
     }
 
+    .batch-count {
+      margin-left: auto;
+      font-size: 12px;
+      color: var(--secondary-text-color);
+    }
+
     .refresh {
       margin-left: 10px;
     }
@@ -585,6 +672,14 @@ path[fill="#ffdda1"] {
       overflow: hidden;
       white-space: nowrap;
       text-overflow: ellipsis;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .batch-check {
+      display: flex;
+      align-items: center;
     }
 
     .opt {

@@ -810,6 +810,14 @@ const emailService = {
 		await orm(c).delete(email).where(eq(email.accountId, accountId)).run();
 	},
 
+	async physicsDeleteByAccountIds(c, accountIds) {
+		if (!accountIds || accountIds.length === 0) {
+			return;
+		}
+		await attService.removeByAccountIds(c, accountIds);
+		await orm(c).delete(email).where(inArray(email.accountId, accountIds)).run();
+	},
+
 	async read(c, params, userId) {
 		const { emailIds } = params;
 		await orm(c).update(email).set({ unread: emailConst.unread.READ }).where(and(eq(email.userId, userId), inArray(email.emailId, emailIds)));

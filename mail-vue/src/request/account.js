@@ -12,8 +12,9 @@ export function accountSetName(accountId,name) {
     return http.put('/account/setName', {name,accountId})
 }
 
-export function accountDelete(accountId) {
-    return http.delete('/account/delete', {params: {accountId}})
+export function accountDelete(accountIds) {
+    const ids = Array.isArray(accountIds) ? accountIds.join(',') : accountIds
+    return http.delete('/account/delete', {params: {accountIds: ids}})
 }
 
 export function accountSetAllReceive(accountId) {

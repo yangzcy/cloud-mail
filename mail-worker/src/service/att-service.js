@@ -253,6 +253,10 @@ const attService = {
 		await this.removeAttByField(c, "account_id", [accountId])
 	},
 
+	async removeByAccountIds(c, accountIds) {
+		await this.removeAttByField(c, "account_id", accountIds)
+	},
+
 	selectOneByKeys(c, keys) {
 		if (!keys || keys.length === 0) {
 			return []

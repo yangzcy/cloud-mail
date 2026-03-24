@@ -15,6 +15,20 @@ import verifyRecordService from './verify-record-service';
 
 const accountService = {
 
+	parseAccountIds(params) {
+		const rawIds = params.accountIds ?? params.accountId;
+		if (!rawIds && rawIds !== 0) {
+			return [];
+		}
+
+		const ids = `${rawIds}`
+			.split(',')
+			.map(id => Number(id))
+			.filter(id => Number.isInteger(id) && id > 0);
+
+		return [...new Set(ids)];
+	},
+
 	async add(c, params, userId) {
 
 		const { addEmailVerify , addEmail, manyEmail, addVerifyCount, minEmailPrefix, emailPrefixFilter } = await settingService.query(c);
@@ -154,22 +168,38 @@ const accountService = {
 
 	async delete(c, params, userId) {
 
-		let { accountId } = params;
-
 		const user = await userService.selectById(c, userId);
-		const accountRow = await this.selectById(c, accountId);
+		const accountIds = this.parseAccountIds(params);
+		if (accountIds.length === 0) {
+			return;
+		}
 
-		if (accountRow.email === user.email) {
+		const accountList = await orm(c)
+			.select()
+			.from(account)
+			.where(and(
+				inArray(account.accountId, accountIds),
+				eq(account.isDel, isDel.NORMAL)
+			))
+			.all();
+
+		if (accountList.length !== accountIds.length) {
+			throw new BizError(t('noUserAccount'));
+		}
+
+		if (accountList.some(accountRow => accountRow.email === user.email)) {
 			throw new BizError(t('delMyAccount'));
 		}
 
-		if (accountRow.userId !== user.userId) {
+		if (accountList.some(accountRow => accountRow.userId !== user.userId)) {
 			throw new BizError(t('noUserAccount'));
 		}
 
 		await orm(c).update(account).set({ isDel: isDel.DELETE }).where(
-			and(eq(account.userId, userId),
-				eq(account.accountId, accountId)))
+			and(
+				eq(account.userId, userId),
+				inArray(account.accountId, accountIds)
+			))
 			.run();
 	},
 
@@ -257,9 +287,12 @@ const accountService = {
 	},
 
 	async physicsDelete(c, params) {
-		const { accountId } = params
-		await emailService.physicsDeleteByAccountId(c, accountId)
-		await orm(c).delete(account).where(eq(account.accountId, accountId)).run();
+		const accountIds = this.parseAccountIds(params);
+		if (accountIds.length === 0) {
+			return;
+		}
+		await emailService.physicsDeleteByAccountIds(c, accountIds)
+		await orm(c).delete(account).where(inArray(account.accountId, accountIds)).run();
 	},
 
 	async setAllReceive(c, params, userId) {

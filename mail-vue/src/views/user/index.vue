@@ -188,7 +188,11 @@
       </div>
     </el-dialog>
     <el-dialog class="account-dialog" v-model="accountShow" :title="t('userAccount')" @closed="resetAccountList" >
-      <el-table :data="accountList" style="height: 480px" v-loading="accountLoading" element-loading-background="transparent" :empty-text="accountLoading ? '' : null">
+      <div class="account-table-actions">
+        <el-button type="danger" plain size="small" @click="deleteSelectedAccounts">{{ t('delete') }}</el-button>
+      </div>
+      <el-table ref="accountTableRef" :data="accountList" style="height: 480px" v-loading="accountLoading" element-loading-background="transparent" :empty-text="accountLoading ? '' : null">
+        <el-table-column type="selection" width="48" />
         <el-table-column property="email" :label="t('emailAccount')" >
           <template #default="props">
             <div class="email-row">{{ props.row.email }}</div>
@@ -467,6 +471,7 @@ const settingLoading = ref(false)
 const tableLoading = ref(true)
 const roleList = reactive([])
 const mySelect = ref({})
+const accountTableRef = ref({})
 const accountList = reactive([])
 const accountParams = reactive({
   size: 10,
@@ -551,13 +556,21 @@ const handleContextmenu = (row, column, cell, event) => {
   rightClickUser.value = row;
 }
 
-function deleteAccount(account) {
-  ElMessageBox.confirm(t('delConfirm', {msg: account.email}), {
+function deleteAccount(accounts) {
+  const accountRows = Array.isArray(accounts) ? accounts : [accounts]
+  const accountIds = accountRows.map(account => account.accountId)
+  if (accountIds.length === 0) {
+    return
+  }
+
+  const message = accountRows.length === 1 ? t('delConfirm', {msg: accountRows[0].email}) : t('delEmailsConfirm')
+
+  ElMessageBox.confirm(message, {
     confirmButtonText: t('confirm'),
     cancelButtonText: t('cancel'),
     type: 'warning'
   }).then(() => {
-    userDeleteAccount(account.accountId).then(() => {
+    userDeleteAccount(accountIds).then(() => {
       getAccountList()
       ElMessage({
         message: t('delSuccessMsg'),
@@ -566,6 +579,11 @@ function deleteAccount(account) {
       })
     })
   });
+}
+
+function deleteSelectedAccounts() {
+  const rows = accountTableRef.value.getSelectionRows?.() || []
+  deleteAccount(rows)
 }
 function accountCurChange(e) {
   accountParams.num = e
@@ -577,6 +595,7 @@ function resetAccountList() {
   accountParams.num = 0
   accountParams.size = 10
   accountParams.total = 0
+  accountTableRef.value?.clearSelection?.()
 }
 
 function openAccountList(userId) {
@@ -1157,6 +1176,13 @@ function adjustWidth() {
   display: flex;
   justify-content: end;
   width: 100%;
+}
+
+.account-table-actions {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  margin-bottom: 12px;
 }
 
 .pagination {
