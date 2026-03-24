@@ -50,7 +50,19 @@ const accountService = {
 		let accountRow = await this.selectByEmailIncludeDel(c, email);
 
 		if (accountRow && accountRow.isDel === isDel.DELETE) {
-			throw new BizError(t('isDelAccount'));
+			await orm(c)
+				.update(account)
+				.set({
+					email,
+					userId,
+					name: emailUtils.getName(email),
+					status: 0,
+					isDel: isDel.NORMAL
+				})
+				.where(eq(account.accountId, accountRow.accountId))
+				.run();
+
+			return this.selectByEmailIncludeDel(c, email);
 		}
 
 		if (accountRow) {
@@ -207,6 +219,10 @@ const accountService = {
 
 	async restoreByUserId(c, userId) {
 		await orm(c).update(account).set({isDel: isDel.NORMAL}).where(eq(account.userId, userId)).run();
+	},
+
+	async deleteByUserId(c, userId) {
+		await orm(c).update(account).set({ isDel: isDel.DELETE }).where(eq(account.userId, userId)).run();
 	},
 
 	async setName(c, params, userId) {

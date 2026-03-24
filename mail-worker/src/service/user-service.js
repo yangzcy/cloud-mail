@@ -1,6 +1,7 @@
 import BizError from '../error/biz-error';
 import accountService from './account-service';
 import orm from '../entity/orm';
+import account from '../entity/account';
 import user from '../entity/user';
 import { and, asc, count, desc, eq, inArray, sql } from 'drizzle-orm';
 import { emailConst, isDel, roleConst, userConst } from '../const/entity-const';
@@ -96,6 +97,7 @@ const userService = {
 
 	async delete(c, userId) {
 		await orm(c).update(user).set({ isDel: isDel.DELETE }).where(eq(user.userId, userId)).run();
+		await accountService.deleteByUserId(c, userId);
 		await c.env.kv.delete(kvConst.AUTH_INFO + userId)
 	},
 
@@ -314,17 +316,14 @@ const userService = {
 			throw new BizError(t('pwdMinLength'));
 		}
 
+		const userRow = await userService.selectByEmailIncludeDel(c, email);
 		const accountRow = await accountService.selectByEmailIncludeDel(c, email);
 
-		if (accountRow && accountRow.isDel === isDel.DELETE) {
-			throw new BizError(t('isDelUser'));
-		}
-
-		if (accountRow) {
+		if (userRow?.isDel === isDel.NORMAL && accountRow?.isDel === isDel.NORMAL) {
 			throw new BizError(t('isRegAccount'));
 		}
 
-		const role = roleService.selectById(c, type);
+		const role = await roleService.selectById(c, type);
 
 		if (!role) {
 			throw new BizError(t('roleNotExist'));
@@ -332,11 +331,42 @@ const userService = {
 
 		const { salt, hash } = await saltHashUtils.hashPassword(password);
 
-		const userId = await userService.insert(c, { email, password: hash, salt, type });
+		let userId = userRow?.userId;
+
+		if (userRow) {
+			await orm(c)
+				.update(user)
+				.set({
+					email,
+					password: hash,
+					salt,
+					type,
+					status: userConst.status.NORMAL,
+					isDel: isDel.NORMAL
+				})
+				.where(eq(user.userId, userRow.userId))
+				.run();
+		} else {
+			userId = await userService.insert(c, { email, password: hash, salt, type });
+		}
 
 		await userService.updateUserInfo(c, userId, true);
 
-		await accountService.insert(c, { userId: userId, email, type, name: emailUtils.getName(email) });
+		if (accountRow) {
+			await orm(c)
+				.update(account)
+				.set({
+					userId,
+					email,
+					name: emailUtils.getName(email),
+					status: 0,
+					isDel: isDel.NORMAL
+				})
+				.where(eq(account.accountId, accountRow.accountId))
+				.run();
+		} else {
+			await accountService.insert(c, { userId, email, type, name: emailUtils.getName(email) });
+		}
 	},
 
 	async resetDaySendCount(c) {
