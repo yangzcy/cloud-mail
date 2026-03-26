@@ -139,23 +139,39 @@
 git remote -v
 ```
 
-### 只更新自己的远程仓库
+### 默认策略
 
-适用于当前不打算同步官方更新，只想把本地 `main` 和标签发布到自己的 fork：
+- 默认先 `fetch`，再决定是否 `rebase`。
+- 如果只是把本地已确认的提交发布到自己的 fork，优先使用 `git pull --rebase origin main` 保持线性历史。
+- 如果需要吸收官方最新改动，优先使用 `git fetch upstream` + `git rebase upstream/main`，避免无意义的合并提交。
+
+### 只发布到自己的 fork
+
+适用于当前不打算同步官方更新，只想把本地 `main` 和标签发布到自己的 `origin`：
 
 ```bash
 git checkout main
 git status
 git pull --rebase origin main
+git log --oneline --max-count=5
 git push origin main
-git push origin v1.0
-git push origin 1.0 --force
+```
+
+如果需要同时发布标签，先显式确认标签指向的提交，再推送：
+
+```bash
+git tag -f v1.0 <commit>
+git tag -f 1.0 <commit>
+git rev-parse v1.0 1.0 main
+git push origin refs/tags/v1.0 --force
+git push origin refs/tags/1.0 --force
 ```
 
 说明：
 
 - `v1.0` 和 `1.0` 可以同时保留，兼容不同使用习惯。
-- 如果 `1.0` 标签没有改过指向，可以把 `--force` 去掉。
+- 只有在标签已经存在且需要改到新提交时，才使用 `--force`。
+- 推送标签时使用 `refs/tags/...`，减少分支名和标签名冲突时的歧义。
 
 ### 同步官方更新后再发布
 
@@ -165,17 +181,17 @@ git push origin 1.0 --force
 git checkout main
 git status
 git fetch upstream
-git merge upstream/main
+git rebase upstream/main
 git push origin main
 ```
 
-如果需要发新标签：
+如果同步上游后需要发新标签：
 
 ```bash
-git tag v1.1
-git tag 1.1
-git push origin v1.1
-git push origin 1.1
+git tag -f v1.1 <commit>
+git tag -f 1.1 <commit>
+git push origin refs/tags/v1.1 --force
+git push origin refs/tags/1.1 --force
 ```
 
 ### 发布前最小检查项
@@ -186,6 +202,15 @@ git push origin 1.1
 2. `git log --oneline --max-count=5` 中最新提交就是准备发布的版本提交。
 3. `git remote -v` 中 `origin` 和 `upstream` 没有配反。
 4. 标签最终指向预期提交，必要时用 `git rev-parse 1.0 v1.0 main` 交叉确认。
+
+### 发布后最小验证项
+
+发布后至少确认以下几点：
+
+1. `git ls-remote --heads origin main` 返回的提交与本地 `git rev-parse main` 一致。
+2. 如果推了标签，`git ls-remote --tags origin v1.0 1.0` 返回的提交与本地标签一致。
+3. 远端仓库页面上的分支和标签已更新，没有推错到 `upstream`。
+4. 如果你的实际部署依赖 GitHub Actions、Cloudflare Worker 或静态站点发布，确认对应流水线已经执行并完成。
 
 ## 新增功能时的建议
 

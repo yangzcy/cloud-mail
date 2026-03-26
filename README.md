@@ -52,32 +52,26 @@
 - `upstream`
   官方仓库，用于获取上游更新。
 
-常用命令：
+常用检查命令：
 
 ```bash
 git remote -v
 git checkout main
 git pull --rebase origin main
+git log --oneline --max-count=3
+```
+
+发布时建议同时保留 `v1.0` 和 `1.0` 两种标签格式，但请先确认标签指向的提交，再推送到远端：
+
+```bash
+git tag -f v1.0 <commit>
+git tag -f 1.0 <commit>
 git push origin main
+git push origin refs/tags/v1.0 --force
+git push origin refs/tags/1.0 --force
 ```
 
-发布版本时建议同时保留两种标签格式：
-
-```bash
-git tag v1.0
-git tag 1.0
-git push origin v1.0
-git push origin 1.0
-```
-
-如果标签已经存在但需要改到新的提交，可强制更新：
-
-```bash
-git tag -f 1.0
-git push origin 1.0 --force
-```
-
-维护说明见 [`doc/maintenance.md`](/root/cloud-mail/doc/maintenance.md)。
+完整发布、同步、校验和注意事项见 [`doc/maintenance.md`](/root/cloud-mail/doc/maintenance.md)。
 
 
 
@@ -187,5 +181,4 @@ cloud-mail
 ## 交流
 
 [Telegram](https://t.me/cloud_mail_tg)
-
 
