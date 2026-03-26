@@ -10,11 +10,13 @@ export default {
             return;
         }
 
+        // 指令支持单个权限 key，也支持“任一命中即可显示”的权限数组。
         const hasPermission = Array.isArray(value)
             ? value.some(key => permKeys.includes(key))
             : permKeys.includes(value);
 
         if (!hasPermission) {
+            // 无权限时直接从 DOM 移除，比 disabled 更符合后台菜单/按钮的展示预期。
             el.parentNode && el.parentNode.removeChild(el);
         }
     }
@@ -27,6 +29,7 @@ export function hasPerm(permKey) {
 
 
 export function permsToRouter(permKeys) {
+    // 把按钮权限翻译成可访问路由，管理后台菜单和路由都依赖这份映射。
     const routerList = []
     Object.keys(routers).forEach(perm => {
         if (permKeys.includes(perm) || permKeys.includes('*')) {

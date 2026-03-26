@@ -21,15 +21,15 @@ let shadowRoot = null
 function updateContent() {
   if (!shadowRoot) return;
 
-  // 1. 提取 <body> 的 style 属性（如果存在）
+  // 提取 body 上的内联样式。
   const bodyStyleRegex = /<body[^>]*style="([^"]*)"[^>]*>/i;
   const bodyStyleMatch = props.html.match(bodyStyleRegex);
   const bodyStyle = bodyStyleMatch ? bodyStyleMatch[1] : '';
 
-  // 2. 移除 <body> 标签（保留内容）
+  // 去掉 body 标签本身，只保留正文内容。
   const cleanedHtml = props.html.replace(/<\/?body[^>]*>/gi, '');
 
-  // 3. 将 body 的 style 应用到 .shadow-content
+  // 把 body 样式转移到 shadow-content 上，尽量还原原始邮件排版。
   shadowRoot.innerHTML = `
     <style>
       :host {
@@ -63,7 +63,7 @@ function updateContent() {
         width: fit-content;
         height: fit-content;
         min-width: 100%;
-        ${bodyStyle ? bodyStyle : ''} /* 注入 body 的 style */
+        ${bodyStyle ? bodyStyle : ''}
       }
 
       img:not(table img) {

@@ -12,8 +12,23 @@ import turnstileService from './turnstile-service';
 import roleService from './role-service';
 import { t } from '../i18n/i18n';
 import verifyRecordService from './verify-record-service';
+import { chunkArray } from '../utils/batch-utils';
 
 const accountService = {
+
+	parseAccountIds(params) {
+		const rawIds = params.accountIds ?? params.accountId;
+		if (!rawIds && rawIds !== 0) {
+			return [];
+		}
+
+		const ids = `${rawIds}`
+			.split(',')
+			.map(id => Number(id))
+			.filter(id => Number.isInteger(id) && id > 0);
+
+		return [...new Set(ids)];
+	},
 
 	async add(c, params, userId) {
 
@@ -50,7 +65,19 @@ const accountService = {
 		let accountRow = await this.selectByEmailIncludeDel(c, email);
 
 		if (accountRow && accountRow.isDel === isDel.DELETE) {
-			throw new BizError(t('isDelAccount'));
+			await orm(c)
+				.update(account)
+				.set({
+					email,
+					userId,
+					name: emailUtils.getName(email),
+					status: 0,
+					isDel: isDel.NORMAL
+				})
+				.where(eq(account.accountId, accountRow.accountId))
+				.run();
+
+			return this.selectByEmailIncludeDel(c, email);
 		}
 
 		if (accountRow) {
@@ -142,23 +169,48 @@ const accountService = {
 
 	async delete(c, params, userId) {
 
-		let { accountId } = params;
-
 		const user = await userService.selectById(c, userId);
-		const accountRow = await this.selectById(c, accountId);
-
-		if (accountRow.email === user.email) {
-			throw new BizError(t('delMyAccount'));
+		const accountIds = this.parseAccountIds(params);
+		if (accountIds.length === 0) {
+			return;
 		}
 
-		if (accountRow.userId !== user.userId) {
+		// 先把要删除的账号分块查出来做权限校验，避免一次性传入过多 accountId。
+		const accountList = [];
+		for (const batch of chunkArray(accountIds)) {
+			const rows = await orm(c)
+				.select()
+				.from(account)
+				.where(and(
+					inArray(account.accountId, batch),
+					eq(account.isDel, isDel.NORMAL)
+				))
+				.all();
+			accountList.push(...rows);
+		}
+
+		if (accountList.length !== accountIds.length) {
 			throw new BizError(t('noUserAccount'));
 		}
 
-		await orm(c).update(account).set({ isDel: isDel.DELETE }).where(
-			and(eq(account.userId, userId),
-				eq(account.accountId, accountId)))
-			.run();
+		if (accountList.some(accountRow => accountRow.email === user.email)) {
+			throw new BizError(t('delMyAccount'));
+		}
+
+		if (accountList.some(accountRow => accountRow.userId !== user.userId)) {
+			throw new BizError(t('noUserAccount'));
+		}
+
+		// 账号下可能有大量邮件和附件，先级联清理，再删除账号本身。
+		await emailService.physicsDeleteByAccountIds(c, accountIds);
+		for (const batch of chunkArray(accountIds)) {
+			await orm(c).delete(account).where(
+				and(
+					eq(account.userId, userId),
+					inArray(account.accountId, batch)
+				))
+				.run();
+		}
 	},
 
 	selectById(c, accountId) {
@@ -178,22 +230,43 @@ const accountService = {
 
 	async physicsDeleteByUserIds(c, userIds) {
 		await emailService.physicsDeleteUserIds(c, userIds);
-		await orm(c).delete(account).where(inArray(account.userId,userIds)).run();
+		if (!userIds || userIds.length === 0) {
+			return;
+		}
+
+		// 按用户批量删除账号时也要分块，避免“清理用户”类操作再次撞上 D1 限制。
+		for (const batch of chunkArray(userIds)) {
+			await orm(c).delete(account).where(inArray(account.userId, batch)).run();
+		}
 	},
 
 	async selectUserAccountCountList(c, userIds, del = isDel.NORMAL) {
-		const result = await orm(c)
-			.select({
-				userId: account.userId,
-				count: count(account.accountId)
-			})
-			.from(account)
-			.where(and(
-				inArray(account.userId, userIds),
-				eq(account.isDel, del)
-			))
-			.groupBy(account.userId)
-		return result;
+		if (!userIds || userIds.length === 0) {
+			return [];
+		}
+
+		const countMap = new Map();
+
+		// 用户列表页会同时统计很多用户的账号数，这里按块查询后在内存里合并。
+		for (const batch of chunkArray([...new Set(userIds)])) {
+			const result = await orm(c)
+				.select({
+					userId: account.userId,
+					count: count(account.accountId)
+				})
+				.from(account)
+				.where(and(
+					inArray(account.userId, batch),
+					eq(account.isDel, del)
+				))
+				.groupBy(account.userId);
+
+			result.forEach(item => {
+				countMap.set(item.userId, (countMap.get(item.userId) || 0) + item.count);
+			});
+		}
+
+		return [...countMap.entries()].map(([userId, count]) => ({ userId, count }));
 	},
 
 	async countUserAccount(c, userId) {
@@ -207,6 +280,10 @@ const accountService = {
 
 	async restoreByUserId(c, userId) {
 		await orm(c).update(account).set({isDel: isDel.NORMAL}).where(eq(account.userId, userId)).run();
+	},
+
+	async deleteByUserId(c, userId) {
+		await orm(c).update(account).set({ isDel: isDel.DELETE }).where(eq(account.userId, userId)).run();
 	},
 
 	async setName(c, params, userId) {
@@ -240,10 +317,28 @@ const accountService = {
 		return { list, total }
 	},
 
+	async allAccountIds(c, userId) {
+		const userRow = await userService.selectByIdIncludeDel(c, userId);
+		const list = await orm(c)
+			.select({ accountId: account.accountId })
+			.from(account)
+			.where(and(
+				eq(account.userId, userId),
+				ne(account.email, userRow.email)
+			))
+			.all();
+		return list.map(item => item.accountId);
+	},
+
 	async physicsDelete(c, params) {
-		const { accountId } = params
-		await emailService.physicsDeleteByAccountId(c, accountId)
-		await orm(c).delete(account).where(eq(account.accountId, accountId)).run();
+		const accountIds = this.parseAccountIds(params);
+		if (accountIds.length === 0) {
+			return;
+		}
+		await emailService.physicsDeleteByAccountIds(c, accountIds)
+		for (const batch of chunkArray(accountIds)) {
+			await orm(c).delete(account).where(inArray(account.accountId, batch)).run();
+		}
 	},
 
 	async setAllReceive(c, params, userId) {

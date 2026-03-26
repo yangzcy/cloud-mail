@@ -166,6 +166,7 @@ const contacts = computed(() => writerStore.sendRecipientRecord.map(item => ({em
 function openContacts() {
   showContacts.value = true
   nextTick(() => {
+    // 联系人弹窗打开后，用当前收件人列表反向同步表格勾选状态。
     form.receiveEmail.forEach(item => {
       if (writerStore.sendRecipientRecord.includes(item)) {
         contactsTabRef.value.toggleRowSelection({email: item});
@@ -195,6 +196,7 @@ function chooseContact() {
     }
   })
 
+  // 已经不在弹窗勾选中的历史联系人，从当前收件人列表里移除，但手动新输入的地址保留。
   form.receiveEmail = form.receiveEmail.filter(item => {
     return contactList.includes(item) || !writerStore.sendRecipientRecord.includes(item);
   });
@@ -220,6 +222,7 @@ const openSelect = () => {
 
 function inputChange(value) {
 
+  // 收件人输入联想只从历史记录里取前缀匹配结果，避免下拉过长影响录入体验。
   selectRecipientList.value = writerStore.sendRecipientRecord.filter(item => value && !form.receiveEmail.includes(item) && item.startsWith(value)).slice(0, 10);
 
   if (!selectStatus && selectRecipientList.value.length > 0) {
@@ -234,6 +237,7 @@ function inputChange(value) {
 
 function addTagChange(val) {
 
+  // 输入框支持一次粘贴多个邮箱，统一按中英文逗号拆分并去重。
   const emails = Array.from(new Set(
       val.split(/[,，]/).map(item => item.trim()).filter(item => item)
   ));
@@ -352,10 +356,12 @@ async function sendEmail() {
   show.value = false
 
   emailSend(form, (e) => {
+    // 预留 2% 给后端收尾，避免上传完成前进度条先到 100% 造成误判。
     percent.value = Math.round((e.loaded * 98) / e.total)
   }).then(emailList => {
     const email = emailList[0]
     emailList.forEach(item => {
+      // 发件成功后直接推入发件列表，不必等待下一次完整刷新。
       emailStore.sendScroll?.addItem(item)
     })
 
@@ -368,6 +374,7 @@ async function sendEmail() {
 
     userStore.refreshUserInfo();
 
+    // 不论成功失败，都把本次收件人沉淀为历史记录，供后续自动补全使用。
     addRecipientRecord();
 
     if (form.draftId) {
@@ -400,6 +407,7 @@ async function sendEmail() {
 }
 
 function addRecipientRecord() {
+  // 先去掉已有重复项，再把最新收件人插到最前面，形成“最近使用优先”的历史记录。
   writerStore.sendRecipientRecord = writerStore.sendRecipientRecord.filter(
       email => !form.receiveEmail.includes(email)
   );
@@ -409,6 +417,7 @@ function addRecipientRecord() {
 }
 
 function resetForm() {
+  // 重置时不仅清空表单，也要清掉回复/转发基线数据，避免下次打开误判为草稿变更。
   form.receiveEmail = []
   form.subject = ''
   form.content = ''
@@ -444,6 +453,7 @@ function openForward(email) {
   defValue.value = ''
 
   setTimeout(() => {
+    // TinyMCE 需要在弹窗和默认值都就绪后再回填正文，否则引用内容可能丢失。
     defValue.value = `
       ${formatImage(email.content) || `<pre style="font-family: inherit;word-break: break-word;white-space: pre-wrap;margin: 0">${email.text}</pre>`}
     `
@@ -477,6 +487,7 @@ function openReply(email) {
   defValue.value = ''
 
   setTimeout(() => {
+    // 回复时把原始邮件内容包成引用块，同时保存一份基线，供关闭时判断是否需要存草稿。
     defValue.value = `
     <div></div>
     <div>
@@ -507,6 +518,7 @@ function formatImage(content) {
 }
 
 function open() {
+  // 发件账号优先使用当前选中的别名账号，没有时退回主账号。
   if (!accountStore.currentAccount.email) {
     form.sendEmail = userStore.user.email;
     form.accountId = userStore.user.account.accountId;
@@ -551,6 +563,7 @@ function close() {
   }
 
   if (form.draftId) {
+    // 正在编辑已有草稿时，关闭窗口只更新草稿内容，不再弹二次确认。
     draftStore.setDraft = {...toRaw(form)}
     show.value = false
     resetForm()
@@ -564,6 +577,7 @@ function close() {
   }
 
   if (backReply.sendType === 'reply' || backReply.sendType === 'forward') {
+    // 回复/转发如果内容未改动，就直接关闭，不额外生成草稿。
     let subjectFlag = form.subject === backReply.subject
     let contentFlag = editor.value.getContent() === backReply.content
     let receiveFlag = form.receiveEmail.length === 1 && form.receiveEmail[0] === backReply.receiveEmail[0]
@@ -583,6 +597,7 @@ function close() {
     type: 'warning',
     distinguishCancelAndClose: true
   }).then(async () => {
+    // 新建草稿只保存正文和元信息，附件单独落到本地库，避免结构过深。
     const formData = {...toRaw(form)};
     delete formData.draftId
     delete formData.attachments

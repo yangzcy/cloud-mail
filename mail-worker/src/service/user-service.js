@@ -1,8 +1,10 @@
 import BizError from '../error/biz-error';
 import accountService from './account-service';
 import orm from '../entity/orm';
+import account from '../entity/account';
 import user from '../entity/user';
-import { and, asc, count, desc, eq, inArray, sql } from 'drizzle-orm';
+import role from '../entity/role';
+import { and, asc, count, desc, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import { emailConst, isDel, roleConst, userConst } from '../const/entity-const';
 import kvConst from '../const/kv-const';
 import KvConst from '../const/kv-const';
@@ -18,6 +20,7 @@ import { t } from '../i18n/i18n'
 import reqUtils from '../utils/req-utils';
 import {oauth} from "../entity/oauth";
 import oauthService from "./oauth-service";
+import { chunkArray } from '../utils/batch-utils';
 
 const userService = {
 
@@ -96,15 +99,71 @@ const userService = {
 
 	async delete(c, userId) {
 		await orm(c).update(user).set({ isDel: isDel.DELETE }).where(eq(user.userId, userId)).run();
+		await accountService.deleteByUserId(c, userId);
 		await c.env.kv.delete(kvConst.AUTH_INFO + userId)
 	},
 
 	async physicsDelete(c, params) {
 		let { userIds } = params;
-		userIds = userIds.split(',').map(Number);
+		userIds = [...new Set(userIds.split(',').map(id => Number(id)).filter(id => Number.isInteger(id) && id > 0))];
+		if (userIds.length === 0) {
+			return;
+		}
+		// 用户硬删除是最高风险批量链路，按“账号/邮件/附件/OAuth/KV -> 用户”顺序清理。
 		await accountService.physicsDeleteByUserIds(c, userIds);
 		await oauthService.deleteByUserIds(c, userIds);
-		await orm(c).delete(user).where(inArray(user.userId, userIds)).run();
+		await Promise.all(userIds.map(userId => c.env.kv.delete(kvConst.AUTH_INFO + userId)));
+		for (const batch of chunkArray(userIds)) {
+			await orm(c).delete(user).where(inArray(user.userId, batch)).run();
+		}
+	},
+
+	async physicsDeleteAllExcludeAdmin(c) {
+		const userList = await orm(c)
+			.select({
+				userId: user.userId,
+				email: user.email,
+				type: user.type,
+				roleName: role.name
+			})
+			.from(user)
+			.leftJoin(role, eq(role.roleId, user.type))
+			.all();
+
+		const userIds = userList
+			.filter(item => {
+				// 一键清理只删除普通用户，管理员主账号、超级管理员、管理员角色用户都要保留。
+				if (item.email === c.env.admin) {
+					return false;
+				}
+
+				if (item.type === 0) {
+					return false;
+				}
+
+				const roleName = `${item.roleName || ''}`;
+				const roleNameLower = roleName.toLowerCase();
+				if (roleName.includes('管理员') || roleNameLower.includes('admin')) {
+					return false;
+				}
+
+				return true;
+			})
+			.map(item => item.userId);
+
+		if (userIds.length === 0) {
+			return { deletedUserCount: 0 };
+		}
+
+		// 这里复用通用硬删除链路，保证批量清理和单独删除的行为一致。
+		await accountService.physicsDeleteByUserIds(c, userIds);
+		await oauthService.deleteByUserIds(c, userIds);
+		await Promise.all(userIds.map(userId => c.env.kv.delete(kvConst.AUTH_INFO + userId)));
+		for (const batch of chunkArray(userIds)) {
+			await orm(c).delete(user).where(inArray(user.userId, batch)).run();
+		}
+
+		return { deletedUserCount: userIds.length };
 	},
 
 	async list(c, params) {
@@ -130,7 +189,13 @@ const userService = {
 
 
 		if (email) {
-			conditions.push(sql`${user.email} COLLATE NOCASE LIKE ${'%'+ email + '%'}`);
+			conditions.push(
+				or(
+					sql`${user.email} COLLATE NOCASE LIKE ${'%' + email + '%'}`,
+					sql`${oauth.username} COLLATE NOCASE LIKE ${'%' + email + '%'}`,
+					sql`${oauth.name} COLLATE NOCASE LIKE ${'%' + email + '%'}`
+				)
+			);
 		}
 
 
@@ -160,6 +225,7 @@ const userService = {
 		const { total } = await orm(c)
 			.select({ total: count() })
 			.from(user)
+			.leftJoin(oauth, eq(oauth.userId, user.userId))
 			.where(and(...conditions)).get();
 		const userIds = list.map(user => user.userId);
 
@@ -314,17 +380,14 @@ const userService = {
 			throw new BizError(t('pwdMinLength'));
 		}
 
+		const userRow = await userService.selectByEmailIncludeDel(c, email);
 		const accountRow = await accountService.selectByEmailIncludeDel(c, email);
 
-		if (accountRow && accountRow.isDel === isDel.DELETE) {
-			throw new BizError(t('isDelUser'));
-		}
-
-		if (accountRow) {
+		if (userRow?.isDel === isDel.NORMAL && accountRow?.isDel === isDel.NORMAL) {
 			throw new BizError(t('isRegAccount'));
 		}
 
-		const role = roleService.selectById(c, type);
+		const role = await roleService.selectById(c, type);
 
 		if (!role) {
 			throw new BizError(t('roleNotExist'));
@@ -332,17 +395,54 @@ const userService = {
 
 		const { salt, hash } = await saltHashUtils.hashPassword(password);
 
-		const userId = await userService.insert(c, { email, password: hash, salt, type });
+		let userId = userRow?.userId;
+
+		if (userRow) {
+			await orm(c)
+				.update(user)
+				.set({
+					email,
+					password: hash,
+					salt,
+					type,
+					status: userConst.status.NORMAL,
+					isDel: isDel.NORMAL
+				})
+				.where(eq(user.userId, userRow.userId))
+				.run();
+		} else {
+			userId = await userService.insert(c, { email, password: hash, salt, type });
+		}
 
 		await userService.updateUserInfo(c, userId, true);
 
-		await accountService.insert(c, { userId: userId, email, type, name: emailUtils.getName(email) });
+		if (accountRow) {
+			await orm(c)
+				.update(account)
+				.set({
+					userId,
+					email,
+					name: emailUtils.getName(email),
+					status: 0,
+					isDel: isDel.NORMAL
+				})
+				.where(eq(account.accountId, accountRow.accountId))
+				.run();
+		} else {
+			await accountService.insert(c, { userId, email, type, name: emailUtils.getName(email) });
+		}
 	},
 
 	async resetDaySendCount(c) {
 		const roleList = await roleService.selectByIdsAndSendType(c, 'email:send', roleConst.sendType.DAY);
-		const roleIds = roleList.map(action => action.roleId);
-		await orm(c).update(user).set({ sendCount: 0 }).where(inArray(user.type, roleIds)).run();
+		const roleIds = [...new Set(roleList.map(action => action.roleId).filter(roleId => Number.isInteger(roleId) && roleId > 0))];
+		if (roleIds.length === 0) {
+			return;
+		}
+		// 按角色批量重置发送次数时也可能出现大量 roleId，统一分块更新。
+		for (const batch of chunkArray(roleIds)) {
+			await orm(c).update(user).set({ sendCount: 0 }).where(inArray(user.type, batch)).run();
+		}
 	},
 
 	async resetSendCount(c, params) {

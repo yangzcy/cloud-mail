@@ -78,9 +78,9 @@ const router = createRouter({
 })
 
 NProgress.configure({
-    showSpinner: false,   // 不显示旋转图标
-    trickleSpeed: 50,    // 自动递增速度
-    minimum: 0.1          // 最小百分比
+    showSpinner: false, // 不显示旋转图标
+    trickleSpeed: 50, // 自动递增速度
+    minimum: 0.1 // 最小进度
 });
 
 let timer
@@ -99,10 +99,12 @@ router.beforeEach((to, from, next) => {
     const token = localStorage.getItem('token')
 
     if (!token && to.name !== 'login') {
+        // 未登录时统一打回登录页，避免进入需要动态路由和用户信息的页面。
         return next({name: 'login'})
     }
 
     if (!token && to.name === 'login') {
+        // 登录页允许在进入前预加载背景图，减少白屏和闪烁。
         loadBackground(next)
         return
     }
@@ -136,6 +138,7 @@ function loadBackground(next) {
         };
 
         setTimeout(() => {
+            // 背景图加载失败或过慢都不应阻塞路由进入。
             console.warn("背景加载超时，已放行");
             next()
         }, 3000)
@@ -153,6 +156,7 @@ router.afterEach((to) => {
 
     const uiStore = useUiStore()
     if (to.meta.menu) {
+        // 只有主菜单页才根据页面类型决定是否展示账号列。
         if (['content', 'email', 'send'].includes(to.meta.name)) {
             uiStore.accountShow = window.innerWidth > 767;
         } else {

@@ -9,6 +9,7 @@ let http = axios.create({
 
 http.interceptors.request.use(config => {
     const { lang } = useSettingStore();
+    // 所有请求统一带上登录 token 和语言头，后端据此做鉴权和多语言返回。
     config.headers.Authorization = `${localStorage.getItem('token')}`
     config.headers['accept-language'] = lang
     return config
@@ -23,6 +24,7 @@ http.interceptors.response.use((res) => {
 
             if (noMsg) {
 
+                // noMsg 模式下由调用方自己处理错误提示，这里只负责透传结果。
                 data.code === 200 ? resolve(data.data) : reject(data)
 
             } else if (data.code === 401) {
@@ -72,6 +74,7 @@ http.interceptors.response.use((res) => {
     (error) => {
 
         if (error.status === 403) {
+            // 某些极端情况下前端状态与权限状态脱节，直接整页刷新重新初始化。
             location.reload();
             return;
         }
@@ -117,5 +120,4 @@ http.interceptors.response.use((res) => {
     })
 
 export default http
-
 

@@ -12,8 +12,10 @@ import reqUtils from '../utils/req-utils';
 import dayjs from 'dayjs';
 import { isDel, roleConst } from '../const/entity-const';
 import email from '../entity/email';
+import account from '../entity/account';
 import userService from './user-service';
 import KvConst from '../const/kv-const';
+import user from '../entity/user';
 
 const publicService = {
 
@@ -99,6 +101,7 @@ const publicService = {
 
 		if (list.length === 0) return;
 
+		// 公共导入接口会批量创建用户，这里先统一校验邮箱和密码，再逐条落库。
 		for (const emailRow of list) {
 			if (!verifyUtils.isEmail(emailRow.email)) {
 				throw new BizError(t('notEmail'));
@@ -124,37 +127,79 @@ const publicService = {
 		const roleList = await roleService.roleSelectUse(c);
 		const defRole = roleList.find(roleRow => roleRow.isDefault === roleConst.isDefault.OPEN);
 
-		const userList = [];
-
 		for (const emailRow of list) {
 			let { email, hash, salt, roleName } = emailRow;
 			let type = defRole.roleId;
 
 			if (roleName) {
+				// 导入时允许按角色名映射角色；找不到则退回默认角色。
 				const roleRow = roleList.find(role => role.name === roleName);
 				type = roleRow ? roleRow.roleId : type;
 			}
 
-			const userSql = `INSERT INTO user (email, password, salt, type, os, browser, active_ip, create_ip, device, active_time, create_time)
-			VALUES ('${email}', '${hash}', '${salt}', '${type}', '${os}', '${browser}', '${activeIp}', '${activeIp}', '${device}', '${activeTime}', '${activeTime}')`
+			const userRow = await userService.selectByEmailIncludeDel(c, email);
+			const accountRow = await orm(c).select().from(account).where(sql`${account.email} COLLATE NOCASE = ${email}`).get();
 
-			const accountSql = `INSERT INTO account (email, name, user_id)
-			VALUES ('${email}', '${emailUtils.getName(email)}', 0);`;
-
-			userList.push(c.env.db.prepare(userSql));
-			userList.push(c.env.db.prepare(accountSql));
-
-		}
-
-		userList.push(c.env.db.prepare(`UPDATE account SET user_id = (SELECT user_id FROM user WHERE user.email = account.email) WHERE user_id = 0;`))
-
-		try {
-			await c.env.db.batch(userList);
-		} catch (e) {
-			if(e.message.includes('SQLITE_CONSTRAINT')) {
+			if (userRow?.isDel === isDel.NORMAL && accountRow?.isDel === isDel.NORMAL) {
 				throw new BizError(t('emailExistDatabase'))
+			}
+
+			let userId = userRow?.userId;
+
+			if (userRow) {
+				await orm(c)
+					.update(user)
+					.set({
+						email,
+						password: hash,
+						salt,
+						type,
+						status: 0,
+						os,
+						browser,
+						activeIp,
+						createIp: activeIp,
+						device,
+						activeTime,
+						createTime: activeTime,
+						isDel: isDel.NORMAL
+					})
+					.where(eq(user.userId, userRow.userId))
+					.run();
 			} else {
-				throw e
+				userId = await userService.insert(c, {
+					email,
+					password: hash,
+					salt,
+					type,
+					os,
+					browser,
+					activeIp,
+					createIp: activeIp,
+					device,
+					activeTime,
+					createTime: activeTime
+				});
+			}
+
+			if (accountRow) {
+				await orm(c)
+					.update(account)
+					.set({
+						email,
+						name: emailUtils.getName(email),
+						userId,
+						status: 0,
+						isDel: isDel.NORMAL
+					})
+					.where(eq(account.accountId, accountRow.accountId))
+					.run();
+			} else {
+				await orm(c).insert(account).values({
+					email,
+					name: emailUtils.getName(email),
+					userId
+				}).run();
 			}
 		}
 
@@ -162,6 +207,7 @@ const publicService = {
 
 	async genToken(c, params) {
 
+		// 先验证管理员身份，再下发新的公共接口 token。
 		await this.verifyUser(c, params)
 
 		const uuid = uuidv4();
@@ -175,6 +221,7 @@ const publicService = {
 
 		const { email, password } = params
 
+		// 公共 token 只能由管理员主账号签发，避免普通用户拿到导入能力。
 		const userRow = await userService.selectByEmailIncludeDel(c, email);
 
 		if (email !== c.env.admin) {

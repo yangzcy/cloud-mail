@@ -5,6 +5,7 @@ export function emailList(accountId, allReceive, emailId, timeSort, size, type) 
 }
 
 export function emailDelete(emailIds) {
+    // 普通用户邮件列表的批量软删除入口。
     return http.delete('/email/delete?emailIds=' + emailIds)
 }
 
@@ -13,6 +14,7 @@ export function emailLatest(emailId, accountId, allReceive) {
 }
 
 export function emailRead(emailIds) {
+    // 邮件列表批量标记已读入口，支持一次提交多个 emailId。
     return http.put('/email/read', {emailIds})
 }
 

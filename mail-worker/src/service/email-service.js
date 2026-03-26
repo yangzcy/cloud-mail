@@ -21,8 +21,21 @@ import domainUtils from '../utils/domain-uitls';
 import account from "../entity/account";
 import { att } from '../entity/att';
 import telegramService from './telegram-service';
+import { chunkArray } from '../utils/batch-utils';
 
 const emailService = {
+
+	parseEmailIds(params) {
+		const rawIds = params.emailIds ?? params.emailId;
+		if (!rawIds && rawIds !== 0) {
+			return [];
+		}
+
+		return [...new Set(`${rawIds}`
+			.split(',')
+			.map(id => Number(id))
+			.filter(id => Number.isInteger(id) && id > 0))];
+	},
 
 	async list(c, params, userId) {
 
@@ -134,13 +147,22 @@ const emailService = {
 	},
 
 	async delete(c, params, userId) {
-		const { emailIds } = params;
-		const emailIdList = emailIds.split(',').map(Number);
-		await orm(c).update(email).set({ isDel: isDel.DELETE }).where(
-			and(
-				eq(email.userId, userId),
-				inArray(email.emailId, emailIdList)))
-			.run();
+		const emailIds = this.parseEmailIds(params);
+		if (emailIds.length === 0) {
+			return;
+		}
+
+		// 前端可能一次提交很多邮件 ID，软删除也要分块，否则会触发 D1 变量数量限制。
+		for (const batch of chunkArray(emailIds)) {
+			await orm(c)
+				.update(email)
+				.set({ isDel: isDel.DELETE })
+				.where(and(
+					eq(email.userId, userId),
+					inArray(email.emailId, batch)
+				))
+				.run();
+		}
 	},
 
 	receive(c, params, cidAttList, r2domain) {
@@ -148,26 +170,26 @@ const emailService = {
 		return orm(c).insert(email).values({ ...params }).returning().get();
 	},
 
-	//邮件发送
+	// 邮件发送主流程。
 	async send(c, params, userId) {
 
 		let {
-			accountId, //发送账号id
-			name, //发件人名字
-			sendType, //发件类型
-			emailId, //邮件id，如果是回复邮件会带
-			receiveEmail, //收件人邮箱
-			text, //邮件纯文本
-			content, //邮件内容
-			subject, //邮件标题
-			attachments //附件
+			accountId, // 发件账号 ID
+			name, // 发件人名称
+			sendType, // 发件类型
+			emailId, // 回复时携带原邮件 ID
+			receiveEmail, // 收件人邮箱列表
+			text, // 纯文本内容
+			content, // HTML 内容
+			subject, // 邮件标题
+			attachments // 附件列表
 		} = params;
 
 		const { resendTokens, r2Domain, send, domainList } = await settingService.query(c);
 
 		let { imageDataList, html } = await attService.toImageUrlHtml(c, content);
 
-		//判断是否关闭发件功能
+		// 发件总开关关闭时，所有发送请求直接拒绝。
 		if (send === settingConst.send.CLOSE) {
 			throw new BizError(t('disabledSend'), 403);
 		}
@@ -175,7 +197,7 @@ const emailService = {
 		const userRow = await userService.selectById(c, userId);
 		const roleRow = await roleService.selectById(c, userRow.type);
 
-		//判断接收方是不是全部为站内邮箱
+		// 判断收件人是否全部为站内邮箱。
 		const allInternal = receiveEmail.every(email => {
 			const domain = '@' + emailUtils.getDomain(email);
 			return domainList.includes(domain);
@@ -183,19 +205,19 @@ const emailService = {
 
 		if (c.env.admin !== userRow.email) {
 
-			//发件被禁用
+			// 角色被禁止发件。
 			if (roleRow.sendType === 'ban') {
 				throw new BizError(t('bannedSend'), 403);
 			}
 
-			//发件被禁用
+			// 角色只允许站内发件。
 			if (roleRow.sendType === 'internal' && !allInternal) {
 				throw new BizError(t('onlyInternalSend'), 403);
 			}
 
 		}
 
-		//如果不是管理员，权限设置了发送次数
+		// 非管理员用户还要受角色发送次数限制。
 		if (c.env.admin !== userRow.email && roleRow.sendCount) {
 
 			if (userRow.sendCount >= roleRow.sendCount) {
@@ -221,7 +243,7 @@ const emailService = {
 		}
 
 		if (c.env.admin !== userRow.email) {
-			//用户没有这个域名的使用权限
+			// 用户没有该域名的使用权限。
 			if(!roleService.hasAvailDomainPerm(roleRow.availDomain, accountRow.email)) {
 				throw new BizError(t('noDomainPermSend'),403)
 			}
@@ -231,12 +253,12 @@ const emailService = {
 		const domain = emailUtils.getDomain(accountRow.email);
 		const resendToken = resendTokens[domain];
 
-		//如果接收方存在站外邮箱，又没有resend token
+		// 存在站外收件人时，必须具备对应域名的 Resend token。
 		if (!resendToken && !allInternal) {
 			throw new BizError(t('noResendToken'));
 		}
 
-		//没有发件人名字自动截取
+		// 未填写发件人名称时，默认取邮箱名前缀。
 		if (!name) {
 			name = emailUtils.getName(accountRow.email);
 		}
@@ -245,7 +267,7 @@ const emailService = {
 			messageId: null
 		};
 
-		//如果是回复邮件
+		// 回复邮件时，需要读取原邮件信息。
 		if (sendType === 'reply') {
 
 			emailRow = await this.selectById(c, emailId);
@@ -258,7 +280,7 @@ const emailService = {
 
 		let resendResult = {};
 
-		//存在站外时邮箱全部由resend发送
+		// 只要存在站外收件人，整封邮件统一交给 Resend 发送。
 		if (!allInternal) {
 
 			const resend = new Resend(resendToken);
@@ -292,10 +314,10 @@ const emailService = {
 
 		imageDataList = imageDataList.map(item => ({...item, contentId: `<${item.contentId}>`}))
 
-		//把图片标签cid标签切换会通用url
+		// 把正文中的 cid 图片替换回可访问 URL。
 		html = this.imgReplace(html, imageDataList, r2Domain);
 
-		//封装数据保存到数据库
+		// 组装数据库落库数据。
 		const emailData = {};
 		emailData.sendEmail = accountRow.email;
 		emailData.name = name;
@@ -321,15 +343,15 @@ const emailService = {
 			emailData.relation = emailRow.messageId;
 		}
 
-		//如果权限有发送次数增加用户发送次数
+		// 按角色配置累加用户发送次数。
 		if (roleRow.sendCount && roleRow.sendType !== 'internal') {
 			await userService.incrUserSendCount(c, receiveEmail.length, userId);
 		}
 
-		//保存到数据库并返回结果
+		// 先保存发件记录，再补附件信息。
 		const emailResult = await orm(c).insert(email).values(emailData).returning().get();
 
-		//保存内嵌附件
+		// 保存正文内嵌附件。
 		if (imageDataList.length > 0) {
 			if (imageDataList.length > 10) {
 				throw new BizError(t('imageAttLimit'));
@@ -337,7 +359,7 @@ const emailService = {
 			await attService.saveArticleAtt(c, imageDataList, userId, accountId, emailResult.emailId);
 		}
 
-		//保存普通附件
+		// 保存普通附件。
 		if (attachments?.length > 0) {
 			if (attachments.length > 10) {
 				throw new BizError(t('attLimit'));
@@ -348,7 +370,7 @@ const emailService = {
 		const attList = await attService.selectByEmailIds(c, [emailResult.emailId]);
 		emailResult.attList = attList;
 
-		//如果全是站内接收方，直接写入数据库
+		// 纯站内邮件不走外部发送，直接写入本地收件箱。
 		if (allInternal) {
 			await this.HandleOnSiteEmail(c, receiveEmail, emailResult, attList);
 		}
@@ -356,7 +378,7 @@ const emailService = {
 		const dateStr = dayjs().format('YYYY-MM-DD');
 		let daySendTotal = await c.env.kv.get(kvConst.SEND_DAY_COUNT + dateStr);
 
-		//记录每天发件次数统计
+		// 记录全站当日发件次数统计。
 		if (!daySendTotal) {
 			await c.env.kv.put(kvConst.SEND_DAY_COUNT + dateStr, JSON.stringify(receiveEmail.length), { expirationTtl: 60 * 60 * 24 });
 		} else  {
@@ -367,24 +389,28 @@ const emailService = {
 		return [ emailResult ];
 	},
 
-	//处理站内邮件发送
+	// 处理站内邮件分发。
 	async HandleOnSiteEmail(c, receiveEmail, sendEmailData, attList) {
 
 		const { noRecipient  } = await settingService.query(c);
 
-		//查询所有收件人账号信息
-		let accountList = await orm(c).select().from(account).where(inArray(account.email, receiveEmail)).all();
+		// 收件人可能很多，先去重再分块查询账号，避免群发站内邮件时 inArray(...) 过长。
+		const accountList = [];
+		for (const batch of chunkArray([...new Set(receiveEmail)])) {
+			const rows = await orm(c).select().from(account).where(inArray(account.email, batch)).all();
+			accountList.push(...rows);
+		}
 
-		//查询所有收件人权限身份
+		// 查询所有收件人对应的角色权限。
 		const userIds = accountList.map(accountRow => accountRow.userId);
 		let roleList = await roleService.selectByUserIds(c, userIds);
 
-		//封装数据库准备保存到数据库
+		// 组装即将写入数据库的收件记录。
 		const emailDataList = [];
 
 		for (const email of receiveEmail) {
 
-			//把发件人邮件改成收件
+			// 基于发件记录生成一条收件记录。
 			const emailValues = {...sendEmailData}
 			emailValues.status = emailConst.status.RECEIVE;
 			emailValues.type = emailConst.type.RECEIVE;
@@ -394,10 +420,10 @@ const emailService = {
 
 			const accountRow = accountList.find(accountRow => accountRow.email === email);
 
-			//如果收件人存在就把邮件信息改成收件人的
+			// 命中本地账号时，改写为该账号的收件记录。
 			if (accountRow) {
 
-				//设置给收件人保存
+				// 设置收件人归属信息。
 				emailValues.userId = accountRow.userId;
 				emailValues.accountId = accountRow.accountId;
 				emailValues.type = emailConst.type.RECEIVE;
@@ -407,7 +433,7 @@ const emailService = {
 
 				let { banEmail, availDomain } = roleRow;
 
-				//如果收件人没有这个域名的使用权限和有邮件拦截，就把邮件改为拒收状态
+				// 域名权限不匹配或命中拦截规则时，改为拒收状态。
 				if (email !== c.env.admin) {
 
 					if (!roleService.hasAvailDomainPerm(availDomain, email)) {
@@ -424,13 +450,13 @@ const emailService = {
 
 			} else {
 
-				//设置无收件人邮件信息
+				// 未命中本地账号时，记为无人接收邮件。
 				emailValues.userId = 0;
 				emailValues.accountId = 0;
 				emailValues.type = emailConst.type.RECEIVE;
 				emailValues.status = emailConst.status.NOONE;
 
-				//如果无人收件关闭改为拒收
+				// 配置要求无人接收即拒收时，改为拒收状态。
 				if (noRecipient === settingConst.noRecipient.CLOSE) {
 					emailValues.status = emailConst.status.BOUNCED;
 					emailValues.message = `Recipient not found: <${email}>`;
@@ -442,14 +468,14 @@ const emailService = {
 
 		}
 
-		//保存邮件
+		// 批量保存收件记录。
 		const receiveEmailList = emailDataList.filter(emailRow => emailRow.status === emailConst.status.RECEIVE || emailRow.status === emailConst.status.NOONE);
 
 		for (const emailData of receiveEmailList) {
 
 			const emailRow = await orm(c).insert(email).values(emailData).returning().get();
 
-			//设置附件保存
+			// 复制附件归属到对应收件邮件。
 			for (const attRow of attList) {
 				const attValues = {...attRow};
 				attValues.emailId = emailRow.emailId;
@@ -466,7 +492,7 @@ const emailService = {
 
 		let status = emailConst.status.DELIVERED;
 		let message = ''
-		//如果有拒收邮件，就把发件人的邮件改成拒收
+		// 只要任一收件结果为拒收，就回写发件记录状态。
 		if (bouncedEmail) {
 			const messageJson = { message: bouncedEmail.message };
 			message = JSON.stringify(messageJson);
@@ -559,16 +585,29 @@ const emailService = {
 	},
 
 	async physicsDelete(c, params) {
-		let { emailIds } = params;
-		emailIds = emailIds.split(',').map(Number);
+		const emailIds = this.parseEmailIds(params);
+		if (emailIds.length === 0) {
+			return;
+		}
+		// 先删附件和星标，再删邮件主记录，避免留下悬挂数据。
 		await attService.removeByEmailIds(c, emailIds);
 		await starService.removeByEmailIds(c, emailIds);
-		await orm(c).delete(email).where(inArray(email.emailId, emailIds)).run();
+		for (const batch of chunkArray(emailIds)) {
+			await orm(c).delete(email).where(inArray(email.emailId, batch)).run();
+		}
 	},
 
 	async physicsDeleteUserIds(c, userIds) {
+		// 用户级硬删除要按“附件/星标 -> 邮件”顺序清理，保证关联资源一起被回收。
 		await attService.removeByUserIds(c, userIds);
-		await orm(c).delete(email).where(inArray(email.userId, userIds)).run();
+		await starService.removeByUserIds(c, userIds);
+		if (!userIds || userIds.length === 0) {
+			return;
+		}
+
+		for (const batch of chunkArray(userIds)) {
+			await orm(c).delete(email).where(inArray(email.userId, batch)).run();
+		}
 	},
 
 	updateEmailStatus(c, params) {
@@ -580,20 +619,34 @@ const emailService = {
 	},
 
 	async selectUserEmailCountList(c, userIds, type, del = isDel.NORMAL) {
-		const result = await orm(c)
-			.select({
-				userId: email.userId,
-				count: count(email.emailId)
-			})
-			.from(email)
-			.where(and(
-				inArray(email.userId, userIds),
-				eq(email.type, type),
-				eq(email.isDel, del),
-				ne(email.status, emailConst.status.SAVING),
-			))
-			.groupBy(email.userId);
-		return result;
+		if (!userIds || userIds.length === 0) {
+			return [];
+		}
+
+		const countMap = new Map();
+
+		// 统计类查询同样会因为 inArray(userIds) 太长而失败，这里分块聚合后再合并结果。
+		for (const batch of chunkArray([...new Set(userIds)])) {
+			const result = await orm(c)
+				.select({
+					userId: email.userId,
+					count: count(email.emailId)
+				})
+				.from(email)
+				.where(and(
+					inArray(email.userId, batch),
+					eq(email.type, type),
+					eq(email.isDel, del),
+					ne(email.status, emailConst.status.SAVING),
+				))
+				.groupBy(email.userId);
+
+			result.forEach(item => {
+				countMap.set(item.userId, (countMap.get(item.userId) || 0) + item.count);
+			});
+		}
+
+		return [...countMap.entries()].map(([userId, count]) => ({ userId, count }));
 	},
 
 	async allList(c, params) {
@@ -810,9 +863,37 @@ const emailService = {
 		await orm(c).delete(email).where(eq(email.accountId, accountId)).run();
 	},
 
+	async physicsDeleteByAccountIds(c, accountIds) {
+		if (!accountIds || accountIds.length === 0) {
+			return;
+		}
+		// 账号硬删除前先清理账号下的附件，避免 R2 对象和数据库记录不一致。
+		await attService.removeByAccountIds(c, accountIds);
+		for (const batch of chunkArray(accountIds)) {
+			await orm(c).delete(email).where(inArray(email.accountId, batch)).run();
+		}
+	},
+
+	async clearAll(c) {
+		await attService.clearAll(c);
+		await starService.clearAll(c);
+		await orm(c).delete(email).run();
+	},
+
 	async read(c, params, userId) {
-		const { emailIds } = params;
-		await orm(c).update(email).set({ unread: emailConst.unread.READ }).where(and(eq(email.userId, userId), inArray(email.emailId, emailIds)));
+		const emailIds = this.parseEmailIds(params);
+		if (emailIds.length === 0) {
+			return;
+		}
+
+		// 已读操作在“全选当前页/批量操作”场景下也可能很多条，同样按块更新。
+		for (const batch of chunkArray(emailIds)) {
+			await orm(c)
+				.update(email)
+				.set({ unread: emailConst.unread.READ })
+				.where(and(eq(email.userId, userId), inArray(email.emailId, batch)))
+				.run();
+		}
 	}
 };
 

@@ -2,16 +2,43 @@
   <div class="account-box">
     <div class="head-opt">
       <Icon v-perm="'account:add'" class="icon add" icon="ion:add-outline" width="23" height="23" @click="add"/>
+      <button
+        v-if="hasPerm('account:delete')"
+        class="batch-toggle"
+        type="button"
+        @click="toggleBatchMode"
+      >
+        <Icon :icon="batchMode ? 'mdi:checkbox-multiple-marked-outline' : 'mdi:checkbox-multiple-blank-outline'" width="18" height="18" />
+        <span>{{ batchMode ? t('exitBatch') : t('batchManage') }}</span>
+      </button>
+      <div v-if="batchMode && hasPerm('account:delete')" class="batch-toolbar">
+        <button class="batch-pill" :disabled="selectableAccountIds.length === 0" @click="selectCurrentList">
+          {{ t('selectCurrentList') }}
+        </button>
+        <button class="batch-pill" :disabled="selectableAccountIds.length === 0 || selectAllMode" @click="selectAllAccounts">
+          {{ t('selectAllAccounts') }}
+        </button>
+        <button class="batch-pill" :disabled="selectedAccountIds.length === 0" @click="clearSelectedAccounts">
+          {{ t('clearSelection') }}
+        </button>
+        <div class="batch-count">{{ selectedCountText }}</div>
+        <button class="batch-pill danger" :disabled="selectedAccountIds.length === 0" @click="batchRemove">
+          {{ t('delete') }}
+        </button>
+      </div>
       <Icon class="icon refresh" icon="ion:reload" width="18" height="18" @click="refresh"/>
     </div>
     <el-scrollbar class="scrollbar" ref="scrollbarRef">
       <div v-infinite-scroll="getAccountList" :infinite-scroll-distance="600" :infinite-scroll-immediate="false">
         <el-card class="item" :class="itemBg(item.accountId)" v-for="(item, index) in accounts" :key="item.accountId"
-                 @click="changeAccount(item)">
+                 @click="handleAccountClick(item)">
           <div class="account">
+            <div v-if="batchMode" class="batch-check" @click.stop="toggleSelectedAccount(item.accountId)">
+              <el-checkbox :model-value="isSelected(item.accountId)" :disabled="!canBatchSelect(item)" />
+            </div>
             {{ item.email }}
           </div>
-          <div class="opt">
+          <div class="opt" v-if="!batchMode">
             <div class="send-email" @click.stop>
               <Icon @click="setAllReceive(item)" v-if="!item.allReceive" icon="eva:email-fill" width="22" height="22" color="#fccb1a"/>
               <Icon @click="setAllReceive(item)" v-else icon="flat-color-icons:folder" width="22" height="22" color="#23c4f1" />
@@ -127,9 +154,10 @@
 </template>
 <script setup>
 import {Icon} from "@iconify/vue";
-import {nextTick, reactive, ref, watch} from "vue";
+import {computed, nextTick, reactive, ref, watch} from "vue";
 import {
   accountList,
+  accountSelectableIds,
   accountAdd,
   accountDelete,
   accountSetName,
@@ -164,6 +192,9 @@ const setNameLoading = ref(false)
 const accountName = ref(null)
 const addRef = ref({})
 const scrollbarRef = ref({})
+const batchMode = ref(false)
+const selectedAccountIds = ref([])
+const selectAllMode = ref(false)
 let account = null
 let turnstileId = null
 const botJsError = ref(false)
@@ -294,24 +325,145 @@ function itemBg(accountId) {
   return accountStore.currentAccountId === accountId ? 'item-choose' : ''
 }
 
+function canBatchSelect(account) {
+  return account.accountId !== userStore.user.account.accountId
+}
+
+const selectableAccountIds = computed(() => accounts.filter(canBatchSelect).map(item => item.accountId))
+const selectedCountText = computed(() => {
+  if (selectAllMode.value) {
+    return t('allAccountsSelected', { msg: selectedAccountIds.value.length })
+  }
+  return t('selectedCount', { msg: selectedAccountIds.value.length })
+})
+
+function isSelected(accountId) {
+  return selectedAccountIds.value.includes(accountId)
+}
+
+function toggleSelectedAccount(accountId) {
+  const account = accounts.find(item => item.accountId === accountId)
+  if (!account || !canBatchSelect(account)) {
+    return
+  }
+
+  if (isSelected(accountId)) {
+    selectedAccountIds.value = selectedAccountIds.value.filter(id => id !== accountId)
+    selectAllMode.value = false
+    return
+  }
+
+  selectedAccountIds.value = [...selectedAccountIds.value, accountId]
+  selectAllMode.value = false
+}
+
+function blurAction(event) {
+  event?.currentTarget?.blur?.()
+}
+
+function toggleBatchMode() {
+  batchMode.value = !batchMode.value
+  if (!batchMode.value) {
+    // 退出批量模式时立即清空选择，避免重新进入时沿用旧的跨分页勾选结果。
+    selectedAccountIds.value = []
+    selectAllMode.value = false
+  }
+}
+
+function selectCurrentList(event) {
+  blurAction(event)
+  selectedAccountIds.value = [...selectableAccountIds.value]
+  selectAllMode.value = false
+}
+
+async function selectAllAccounts(event) {
+  blurAction(event)
+  // 当前列表可能只加载了部分账号，这里向后端请求全部可选账号 ID，实现真正的“全选全部结果”。
+  const ids = await accountSelectableIds()
+  selectedAccountIds.value = ids
+  selectAllMode.value = true
+}
+
+function clearSelectedAccounts(event) {
+  blurAction(event)
+  selectedAccountIds.value = []
+  selectAllMode.value = false
+}
+
+function handleAccountClick(account) {
+  if (batchMode.value) {
+    toggleSelectedAccount(account.accountId)
+    return
+  }
+  changeAccount(account)
+}
+
+function resetCurrentAccountIfDeleted(accountIds) {
+  if (!accountIds.includes(accountStore.currentAccountId)) {
+    return
+  }
+
+  // 如果当前正在查看的账号被删掉，需要立刻切换到剩余账号，否则右侧邮件视图会指向不存在的账号。
+  const fallbackAccount = accounts.find(item => !accountIds.includes(item.accountId)) || userStore.user.account
+  accountStore.currentAccountId = fallbackAccount.accountId
+  accountStore.currentAccount = fallbackAccount
+}
+
+function batchRemove(event) {
+  blurAction(event)
+  if (selectedAccountIds.value.length === 0) {
+    return
+  }
+
+  // 批量删除支持当前页和“全选全部结果”两种模式，最终都以 accountId 列表提交。
+  ElMessageBox.confirm(t('delAccountsConfirm', { msg: selectedAccountIds.value.length }), {
+    confirmButtonText: t('confirm'),
+    cancelButtonText: t('cancel'),
+    type: 'warning'
+  }).then(() => {
+    accountDelete(selectedAccountIds.value).then(() => {
+      const deletingIds = [...selectedAccountIds.value]
+      resetCurrentAccountIfDeleted(deletingIds)
+      toggleBatchMode()
+      // 本地列表直接剔除已删账号，避免必须整页重拉才能看到结果。
+      const removableIdSet = new Set(deletingIds)
+      for (let i = accounts.length - 1; i >= 0; i--) {
+        if (removableIdSet.has(accounts[i].accountId)) {
+          accounts.splice(i, 1)
+        }
+      }
+      refresh()
+      emailStore.emailScroll?.refreshList()
+      emailStore.sendScroll?.refreshList()
+      ElNotification({
+        title: t('delete'),
+        message: t('delAccountsSuccess', { msg: deletingIds.length }),
+        type: 'success',
+        duration: 2600,
+      })
+    })
+  });
+}
 
 
 function remove(account) {
-  ElMessageBox.confirm(t('delConfirm', {msg: account.email}), {
+  ElMessageBox.confirm(t('delOneAccountConfirm', {msg: account.email}), {
     confirmButtonText: t('confirm'),
     cancelButtonText: t('cancel'),
     type: 'warning'
   }).then(() => {
     accountDelete(account.accountId).then(() => {
+      resetCurrentAccountIfDeleted([account.accountId])
       const index = accounts.findIndex(item => item.accountId === account.accountId);
       accounts.splice(index, 1);
       if (accounts.length < queryParams.size) {
         getAccountList()
       }
-      ElMessage({
-        message: t('delSuccessMsg'),
+      ElNotification({
+        title: t('delete'),
+        message: t('delOneAccountSuccess'),
         type: 'success',
-        plain: true,
+        duration: 2400,
       })
     })
   });
@@ -321,6 +473,8 @@ function refresh() {
   if (loading.value) {
     return
   }
+  selectedAccountIds.value = []
+  selectAllMode.value = false
   loading.value = false
   followLoading.value = false
   noLoading.value = false
@@ -510,7 +664,8 @@ path[fill="#ffdda1"] {
 </style>
 <style scoped lang="scss">
 .account-box {
-
+  display: flex;
+  flex-direction: column;
   border-right: 1px solid var(--el-border-color) !important;
   background-color: var(--el-bg-color);
   height: 100%;
@@ -519,17 +674,91 @@ path[fill="#ffdda1"] {
   .head-opt {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     height: 38px;
     box-shadow: var(--header-actions-border);
     padding-left: 10px;
     padding-right: 10px;
+    row-gap: 6px;
 
     .icon {
       cursor: pointer;
     }
 
+    .batch-count {
+      font-size: 12px;
+      color: var(--secondary-text-color);
+      white-space: nowrap;
+      padding: 0 4px;
+    }
+
     .refresh {
       margin-left: 10px;
+    }
+
+    .batch-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: 10px;
+      border: 1px solid var(--el-border-color);
+      background: var(--el-fill-color-light);
+      color: var(--el-text-color-primary);
+      border-radius: 999px;
+      padding: 5px 12px;
+      font-size: 12px;
+      line-height: 1;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .batch-toggle:hover {
+      background: var(--el-fill-color);
+      border-color: var(--el-color-primary-light-5);
+      color: var(--el-color-primary);
+    }
+
+    .batch-toolbar {
+      display: inline-flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-left: 10px;
+    }
+
+    .batch-pill {
+      border: 1px solid var(--el-border-color);
+      background: var(--el-fill-color-light);
+      color: var(--el-text-color-primary);
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 12px;
+      line-height: 1;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .batch-pill:hover:not(:disabled) {
+      background: var(--el-fill-color);
+      border-color: var(--el-color-primary-light-5);
+      color: var(--el-color-primary);
+    }
+
+    .batch-pill.danger {
+      background: color-mix(in srgb, var(--el-color-danger-light-9) 88%, white);
+      border-color: var(--el-color-danger-light-5);
+      color: var(--el-color-danger);
+    }
+
+    .batch-pill.danger:hover:not(:disabled) {
+      background: var(--el-color-danger-light-8);
+      border-color: var(--el-color-danger-light-3);
+      color: var(--el-color-danger-dark-2);
+    }
+
+    .batch-pill:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
     }
 
     .add {
@@ -539,15 +768,33 @@ path[fill="#ffdda1"] {
     .head-opt:not(.add) .refresh {
       margin-left: 5px;
     }
+
+    @media (max-width: 767px) {
+      height: auto;
+      min-height: 38px;
+      padding-top: 8px;
+      padding-bottom: 8px;
+
+      .batch-toolbar {
+        width: 100%;
+        margin-left: 0;
+      }
+
+      .batch-toggle {
+        margin-left: 10px;
+      }
+
+      .refresh {
+        margin-left: auto;
+      }
+    }
   }
 
   .scrollbar {
     width: 100%;
-    height: calc(100% - 38px);
+    flex: 1;
+    min-height: 0;
     overflow: auto;
-    @media (max-width: 767px) {
-      height: calc(100% - 98px);
-    }
 
     .empty {
       display: flex;
@@ -585,6 +832,14 @@ path[fill="#ffdda1"] {
       overflow: hidden;
       white-space: nowrap;
       text-overflow: ellipsis;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .batch-check {
+      display: flex;
+      align-items: center;
     }
 
     .opt {

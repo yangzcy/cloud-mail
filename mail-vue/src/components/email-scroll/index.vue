@@ -398,8 +398,8 @@ watch(scrollbarRef, () => {
   updateHasScrollbar();
 })
 
-// 强制刷新 (itemHeight 更改后虚拟滚动列表不会自己更新)
 watch(itemHeight, () => {
+  // 行高变化后，重建虚拟列表，避免滚动定位和占位高度错位。
   keyCount.value ++
 })
 
@@ -428,9 +428,10 @@ watch(noLoading, (isNoLoading) => {
 })
 
 
-// 监听是否到达底部
+// 监听是否滚动到底部。
 watch(() => arrivedState.bottom, (isBottom) => {
   if (isBottom && !loading.value) {
+    // 到达底部后按页继续拉取，形成无限滚动列表。
     loadData();
   }
 });
@@ -449,11 +450,13 @@ watch(
 
 watch(() => emailStore.deleteIds, () => {
   if (emailStore.deleteIds) {
+    // 删除动作可能发生在阅读区或其他列表，这里统一消费全局删除信号。
     deleteEmail(emailStore.deleteIds)
   }
 })
 
 watch(() => emailStore.cancelStarEmailId, () => {
+  // 其他组件取消星标后，当前列表里的状态也要立即同步。
   emailList.forEach(email => {
     if (email.emailId === emailStore.cancelStarEmailId) {
       email.isStar = 0
@@ -462,6 +465,7 @@ watch(() => emailStore.cancelStarEmailId, () => {
 })
 
 watch(() => emailStore.addStarEmailId, () => {
+  // 其他组件新增星标后，当前列表里对应项同步点亮。
   emailList.forEach(email => {
     if (email.emailId === emailStore.addStarEmailId) {
       email.isStar = 1
@@ -491,6 +495,7 @@ function visibleChange(e) {
   },1500)
 
   if (!e && rightClickEmail.value.rightChecked) {
+    // 右键菜单关闭时移除行高亮，避免用户误以为该行仍被选中。
     rightClickEmail.value.rightChecked = false
   }
 }
@@ -513,6 +518,7 @@ const handleContextmenu = (event, email) => {
   event.preventDefault();
   dropdownRef.value?.handleOpen();
 
+  // 保存本次右键命中的邮件，菜单里的删除、回复、搜索都基于它执行。
   rightClickEmail.value = email;
   rightClickEmail.value.rightChecked = true
 }
@@ -580,6 +586,7 @@ function starChange(email) {
     email.isStar = 1;
     props.starAdd(email.emailId).then(() => {
       email.isStar = 1;
+      // 星标变更透传给父组件，父组件可按自己的列表语义插入或剔除邮件。
       props.starSuccess(email)
     }).catch(e => {
       console.error(e)
@@ -605,6 +612,7 @@ function changeAccountShow() {
 const handleRead = () => {
   const emailIds = getSelectedMailsIds();
   props.emailRead(emailIds);
+  // 已读先做本地更新，减少接口往返造成的视觉延迟。
   localRead(emailIds);
 }
 
@@ -664,6 +672,7 @@ function handleDelete() {
   }).then(() => {
 
     if (props.type === 'draft') {
+      // 草稿列表删除走本地 IndexedDB，不走后端邮件接口。
       const draftIds = getSelectedDraftsIds();
       emit('delete-draft', draftIds);
       return;
@@ -682,6 +691,7 @@ function handleDelete() {
 }
 
 function deleteEmail(emailIds) {
+  // 本地移除成功后，如果当前列表不足一页，再自动补拉下一批数据。
   emailIds.forEach(emailId => {
     emailList.forEach((item, index) => {
       if (emailId === item.emailId) {
@@ -706,6 +716,7 @@ function addItem(email) {
   email.formatCreateTime = fromNow(email.formatCreateTime);
 
   if (props.timeSort) {
+    // 正序场景主要用于“最新邮件轮询”，只在尾部允许继续追加时插入。
     if (noLoading.value) {
       handleList([email]);
       emailList.push(email);
@@ -723,6 +734,7 @@ function addItem(email) {
   const index = emailList.findIndex(item => item.emailId < email.emailId)
 
   if (index !== -1) {
+    // 倒序列表保持 emailId 从大到小，新项插入到正确位置。
     handleList([email]);
     emailList.splice(index, 0, email);
   } else {
@@ -741,11 +753,12 @@ function addItem(email) {
 }
 
 function handleCheckAllChange(val) {
+  // 这里的全选只作用于当前已加载列表，不代表跨分页全选。
   emailList.forEach(item => item.checked = val);
   isIndeterminate.value = false;
 }
 
-// 获取选中的邮件列表id
+// 获取当前列表里已勾选的邮件 ID。
 function getSelectedMailsIds() {
   return emailList.filter(item => item.checked).map(item => item.emailId);
 }
@@ -794,6 +807,7 @@ function getEmailList(refresh = false) {
     }
 
   } else {
+    // 主动刷新时从头拉取，并把滚动位置重置回顶部。
     getSkeletonRows()
     emailId = 0
     loading.value = true
@@ -820,13 +834,13 @@ function getEmailList(refresh = false) {
       checked: false
     }));
 
-
     if (refresh) {
       emailList.length = 0
     }
 
     latestEmail.value = data.latestEmail
 
+    // 列表原始数据在进入视图前统一做格式化，避免模板层重复计算。
     handleList(list);
     emailList.push(...list);
     if (refresh) scrollbarRef.value?.setScrollTop(0);

@@ -15,57 +15,62 @@ export async function init() {
     const accountStore = useAccountStore();
 
     const token = localStorage.getItem('token');
-     if (!settingStore.lang) {
-          settingStore.lang = 'zh'
-      }
+    if (!settingStore.lang) {
+        settingStore.lang = 'zh'
+    }
 
     i18n.global.locale.value = settingStore.lang
 
     let setting = null;
-    settingStore.lang = 'zh'
-    i18n.global.locale.value = 'zh'
 
-    if (token) {
-        const userPromise = loginUserInfo().catch(e => {
-            console.error(e);
-            return null;
-        });
-
-        const [s, user] = await Promise.all([websiteConfig(), userPromise]);
-        setting = s;
-        settingStore.settings = setting;
-        settingStore.domainList = setting.domainList;
-        document.title = setting.title;
-
-        if (user) {
-            accountStore.currentAccountId = user.account.accountId;
-            accountStore.currentAccount = user.account;
-            userStore.user = user;
-
-            const routers = permsToRouter(user.permKeys);
-            routers.forEach(routerData => {
-                router.addRoute('layout', routerData);
+    try {
+        if (token) {
+            // 已登录时并行拉取站点配置和当前用户信息，减少首屏等待。
+            const userPromise = loginUserInfo().catch(e => {
+                console.error(e);
+                return null;
             });
+
+            const [s, user] = await Promise.all([websiteConfig(), userPromise]);
+            setting = s;
+            settingStore.settings = setting;
+            settingStore.domainList = setting.domainList;
+            document.title = setting.title;
+
+            if (user) {
+                accountStore.currentAccountId = user.account.accountId;
+                accountStore.currentAccount = user.account;
+                userStore.user = user;
+
+                // 管理后台路由不是静态写死的，而是按当前用户权限动态挂载。
+                const routers = permsToRouter(user.permKeys);
+                routers.forEach(routerData => {
+                    router.addRoute('layout', routerData);
+                });
+            }
+
+        } else {
+            setting = await websiteConfig();
+            settingStore.settings = setting;
+            settingStore.domainList = setting.domainList;
+            document.title = setting.title;
         }
-
-    } else {
-        setting = await websiteConfig();
-        settingStore.settings = setting;
-        settingStore.domainList = setting.domainList;
-        document.title = setting.title;
+    } finally {
+        removeLoading();
     }
-
-    removeLoading();
 }
 
 function removeLoading() {
     if (window.innerWidth < 1025) {
+        // 移动端去掉过渡，避免首屏 loading 遮罩淡出拖慢观感。
         document.documentElement.style.setProperty('--loading-hide-transition', 'none')
     }
     const doc = document.getElementById('loading-first');
+    if (!doc) {
+        return
+    }
     doc.classList.add('loading-hide')
     setTimeout(() => {
         doc.remove()
     },1000)
 }
-

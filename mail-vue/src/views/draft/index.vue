@@ -48,6 +48,7 @@ watch(() => draftStore.setDraft, async () => {
   delete draft.draftId
   delete draft.attachments
 
+  // 草稿编辑窗口关闭时会把最新内容回写到 store，这里统一同步到 IndexedDB。
   if (!draft.content && !draft.subject && !(draft.receiveEmail.length > 0)) {
     await db.value.draft.delete(draftId);
     await db.value.att.delete(draftId);
@@ -63,6 +64,7 @@ watch(() => draftStore.setDraft, async () => {
 })
 
 watch(() => draftStore.refreshList, async () => {
+  // 通过 refreshList 这个信号驱动草稿列表重载，避免在多个组件间直接互相调用。
   const {list} = await getEmailList();
     scroll.value.emailList.length = 0
     scroll.value.handleList(list);
@@ -83,6 +85,7 @@ async function deleteDraft(draftIds) {
 }
 
 async function jumpContent(email) {
+  // 草稿正文和附件分表存储，重新打开时需要把附件补回到写信表单。
   const att = await db.value.att.get(email.draftId)
   email.attachments = att.attachments
   uiStore.writerRef.openDraft(email);

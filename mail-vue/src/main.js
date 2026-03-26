@@ -11,7 +11,15 @@ import perm from "@/perm/perm.js";
 const pinia = createPinia().use(piniaPersistedState)
 import i18n from "@/i18n/index.js";
 const app = createApp(App).use(pinia)
-await init()
+
+try {
+    // 在挂载应用前先完成初始化，确保语言、配置、动态路由和用户信息都已就绪。
+    await init()
+} catch (error) {
+    console.error('init failed', error)
+    window.hideFirstLoading?.()
+}
+
 app.use(router).use(i18n).directive('perm',perm)
 app.config.devtools = true;
 

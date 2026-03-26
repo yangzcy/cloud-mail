@@ -5,11 +5,18 @@ export function allEmailList(params) {
 }
 
 export function allEmailDelete(emailIds) {
+    // 管理员后台对指定邮件做硬删除。
     return http.delete('/allEmail/delete?emailIds=' + emailIds)
 }
 
 export function allEmailBatchDelete(params) {
+    // 管理员按筛选条件批量清理邮件。
     return http.delete('/allEmail/batchDelete', {params: params} )
+}
+
+export function allEmailDeleteAll() {
+    // 管理员一键清理全部邮件。
+    return http.delete('/allEmail/deleteAll')
 }
 
 export function allEmailLatest(emailId) {

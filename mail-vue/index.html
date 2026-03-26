@@ -19,6 +19,30 @@
       const isMobile =  !window.matchMedia("(pointer: fine) and (hover: hover)").matches;
       metaTag.setAttribute('content', uiStore.dark ? (isMobile ? '#141414' : '#000000') : (isMobile ? '#FFFFFF' : '#F1F1F1'));
     }
+
+    window.hideFirstLoading = () => {
+      const loading = document.getElementById('loading-first');
+      if (!loading) {
+        return;
+      }
+
+      loading.classList.add('loading-hide');
+      window.setTimeout(() => {
+        loading.remove();
+      }, 1000);
+    };
+
+    window.addEventListener('error', () => {
+      window.hideFirstLoading();
+    });
+
+    window.addEventListener('unhandledrejection', () => {
+      window.hideFirstLoading();
+    });
+
+    window.setTimeout(() => {
+      window.hideFirstLoading();
+    }, 4000);
   </script>
 </head>
 <style>

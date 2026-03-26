@@ -15,6 +15,7 @@ app.get('/email/latest', async (c) => {
 });
 
 app.delete('/email/delete', async (c) => {
+	// 普通用户邮件列表里的批量软删除入口。
 	await emailService.delete(c, c.req.query(), userContext.getUserId(c));
 	return c.json(result.ok());
 });
@@ -30,7 +31,7 @@ app.post('/email/send', async (c) => {
 });
 
 app.put('/email/read', async (c) => {
+	// 批量标记已读入口，前端可能一次提交很多邮件 ID。
 	await emailService.read(c, await c.req.json(), userContext.getUserId(c));
 	return c.json(result.ok());
 })
-
