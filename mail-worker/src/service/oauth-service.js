@@ -5,6 +5,7 @@ import { eq, inArray } from 'drizzle-orm';
 import userService from "./user-service";
 import loginService from "./login-service";
 import cryptoUtils from "../utils/crypto-utils";
+import { chunkArray } from "../utils/batch-utils";
 
 const oauthService = {
 
@@ -106,10 +107,17 @@ const oauthService = {
 	},
 
 	async deleteByUserIds(c, userIds) {
-		await orm(c).delete(oauth).where(inArray(oauth.userId, userIds)).run();
+		if (!userIds || userIds.length === 0) {
+			return;
+		}
+
+		// OAuth 绑定会跟随用户清理一起批量删除，分块是为了兼容“一键清理用户”场景。
+		for (const batch of chunkArray(userIds)) {
+			await orm(c).delete(oauth).where(inArray(oauth.userId, batch)).run();
+		}
 	},
 
-	//定时任务凌晨清除未绑定邮箱的oauth用户
+	// 定时任务：清理未绑定邮箱的 OAuth 用户。
 	async clearNoBindOathUser(c) {
 		await orm(c).delete(oauth).where(eq(oauth.userId, 0)).run();
 	},

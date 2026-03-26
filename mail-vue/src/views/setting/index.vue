@@ -91,6 +91,7 @@ function setName() {
     return
   }
 
+  // 这里先乐观更新页面名称，接口失败时再回退，避免编辑体验卡顿。
   userStore.user.name = accountName.value
 
   accountSetName(userStore.user.account.accountId,name).then(() => {
@@ -100,6 +101,7 @@ function setName() {
       plain: true,
     })
 
+    // 个人资料页改名后，通过 store 通知账号列表等依赖当前账号名的组件同步刷新。
     accountStore.changeUserAccountName = name
 
   }).catch(() => {

@@ -29,6 +29,7 @@ const loginService = {
 		let { regKey, register, registerVerify, regVerifyCount, minEmailPrefix, emailPrefixFilter } = await settingService.query(c)
 
 		if (oauth) {
+			// OAuth 补绑邮箱时绕过普通注册开关，但仍复用同一套用户创建逻辑。
 			registerVerify = settingConst.registerVerify.CLOSE;
 			register = settingConst.register.OPEN;
 		}
@@ -69,12 +70,14 @@ const loginService = {
 		let regKeyId = 0
 
 		if (regKey === settingConst.regKey.OPEN) {
+			// 强制注册码模式下，注册码决定新用户角色。
 			const result = await this.handleOpenRegKey(c, regKey, code)
 			type = result?.type
 			regKeyId = result?.regKeyId
 		}
 
 		if (regKey === settingConst.regKey.OPTIONAL) {
+			// 可选注册码模式下，有效注册码可覆盖默认角色。
 			const result = await this.handleOpenOptional(c, regKey, code)
 			type = result?.type
 			regKeyId = result?.regKeyId
@@ -115,11 +118,13 @@ const loginService = {
 		let regVerifyOpen = false
 
 		if (registerVerify === settingConst.registerVerify.OPEN) {
+			// 全量开启人机验证时，每次注册都验证 Turnstile。
 			regVerifyOpen = true
 			await turnstileService.verify(c,token)
 		}
 
 		if (registerVerify === settingConst.registerVerify.COUNT) {
+			// COUNT 模式只在达到阈值后才开启验证，降低首次使用门槛。
 			regVerifyOpen = await verifyRecordService.isOpenRegVerify(c, regVerifyCount);
 			if (regVerifyOpen) {
 				await turnstileService.verify(c,token)
@@ -130,11 +135,13 @@ const loginService = {
 
 		const userId = await userService.insert(c, { email, regKeyId,password: hash, salt, type: type || defType });
 
+		// 注册时同时创建同邮箱主账号，后续别名账号都围绕这个 userId 展开。
 		await accountService.insert(c, { userId: userId, email, name: emailUtils.getName(email) });
 
 		await userService.updateUserInfo(c, userId, true);
 
 		if (regKey !== settingConst.regKey.CLOSE && type) {
+			// 只有真正使用了注册码提升角色时才扣减次数。
 			await regKeyService.reduceCount(c, code, 1);
 		}
 
@@ -232,6 +239,7 @@ const loginService = {
 
 		if (authInfo && (authInfo.user.email === userRow.email)) {
 
+			// 同一用户保留最近 10 个会话 token，旧 token 会被挤掉，实现有限多端登录。
 			if (authInfo.tokens.length > 10) {
 				authInfo.tokens.shift();
 			}
@@ -240,6 +248,7 @@ const loginService = {
 
 		} else {
 
+			// 首次登录时在 KV 中创建该用户的会话容器。
 			authInfo = {
 				tokens: [],
 				user: userRow,
@@ -252,11 +261,13 @@ const loginService = {
 
 		await userService.updateUserInfo(c, userRow.userId);
 
+		// JWT 只放最小身份信息，真正的会话白名单放在 KV 中便于主动失效和多端控制。
 		await c.env.kv.put(KvConst.AUTH_INFO + userRow.userId, JSON.stringify(authInfo), { expirationTtl: constant.TOKEN_EXPIRE });
 		return jwt;
 	},
 
 	async logout(c, userId) {
+		// 退出登录时只移除当前 token，不影响该用户其他设备上的会话。
 		const token =userContext.getToken(c);
 		const authInfo = await c.env.kv.get(KvConst.AUTH_INFO + userId, { type: 'json' });
 		const index = authInfo.tokens.findIndex(item => item === token);

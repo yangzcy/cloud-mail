@@ -104,17 +104,20 @@ const srcList = reactive([])
 
 const { t } = useI18n()
 watch(() => accountStore.currentAccountId, () => {
+  // 如果左侧切换了当前账号，右侧阅读区直接返回，避免继续展示旧账号邮件。
   handleBack()
 })
 
 onMounted(() => {
   if (emailStore.contentData.showUnread && email.unread === EmailUnreadEnum.UNREAD) {
+    // 从列表跳入详情页时，首次打开未读邮件会在这里补发“已读”请求。
     email.unread = EmailUnreadEnum.READ;
     emailRead([email.emailId]);
   }
 })
 
 onUnmounted(() => {
+  // 详情页退出后重置一次性标记，避免下一封邮件被误判为“进入详情即已读”。
   emailStore.contentData.showUnread = false;
 })
 
@@ -133,6 +136,7 @@ function toMessage(message) {
 function formatImage(content) {
   content = content || '';
   const domain = settingStore.settings.r2Domain;
+  // 邮件正文里存的是占位域名，展示前替换成当前配置的 R2 访问域名。
   return  content.replace(/{{domain}}/g, toOssDomain(domain) + '/');
 }
 
@@ -158,6 +162,7 @@ function changeStar() {
     email.isStar = 0;
     starCancel(email.emailId).then(() => {
       email.isStar = 0;
+      // 通过全局 store 通知左侧各个列表同步星标状态。
       emailStore.cancelStarEmailId = email.emailId
       setTimeout(() => emailStore.cancelStarEmailId = 0)
       emailStore.starScroll?.deleteEmail([email.emailId])
@@ -169,6 +174,7 @@ function changeStar() {
     email.isStar = 1;
     starAdd(email.emailId).then(() => {
       email.isStar = 1;
+      // 星标列表如果已打开，直接把当前邮件插进去，避免用户手动刷新。
       emailStore.addStarEmailId = email.emailId
       setTimeout(() => emailStore.addStarEmailId = 0)
       emailStore.starScroll?.addItem(email)
@@ -190,6 +196,7 @@ const handleDelete = () => {
     type: 'warning'
   }).then(() => {
     if (emailStore.contentData.delType === 'logic') {
+      // 普通用户页走软删除。
       emailDelete(email.emailId).then(() => {
         ElMessage({
           message: t('delSuccessMsg'),
@@ -200,6 +207,7 @@ const handleDelete = () => {
       })
     } else  {
 
+      // 管理后台邮件详情页走硬删除。
       allEmailDelete(email.emailId).then(() => {
         ElMessage({
           message: t('delSuccessMsg'),
@@ -210,6 +218,7 @@ const handleDelete = () => {
       })
     }
 
+    // 删除完成后返回上一层，并通过全局删除信号让列表自行剔除该邮件。
     router.back()
   })
 }

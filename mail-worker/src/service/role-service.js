@@ -10,6 +10,7 @@ import user from '../entity/user';
 import verifyUtils from '../utils/verify-utils';
 import { t } from '../i18n/i18n.js';
 import emailUtils from '../utils/email-utils';
+import { chunkArray } from '../utils/batch-utils';
 
 const roleService = {
 
@@ -136,11 +137,22 @@ const roleService = {
 		return orm(c).select().from(role).where(eq(role.roleId, roleId)).get();
 	},
 
-	selectByIdsHasPermKey(c, types, permKey) {
-		return orm(c).select({ roleId: role.roleId, sendType: role.sendType, sendCount: role.sendCount }).from(perm)
-			.leftJoin(rolePerm, eq(perm.permId, rolePerm.permId))
-			.leftJoin(role, eq(role.roleId, rolePerm.roleId))
-			.where(and(eq(perm.permKey, permKey), inArray(role.roleId, types))).all();
+	async selectByIdsHasPermKey(c, types, permKey) {
+		if (!types || types.length === 0) {
+			return [];
+		}
+
+		const roleList = [];
+		// 用户列表页会批量读取角色权限，角色 ID 多时按块查询更稳妥。
+		for (const batch of chunkArray([...new Set(types)])) {
+			const rows = await orm(c).select({ roleId: role.roleId, sendType: role.sendType, sendCount: role.sendCount }).from(perm)
+				.leftJoin(rolePerm, eq(perm.permId, rolePerm.permId))
+				.leftJoin(role, eq(role.roleId, rolePerm.roleId))
+				.where(and(eq(perm.permKey, permKey), inArray(role.roleId, batch))).all();
+			roleList.push(...rows);
+		}
+
+		return roleList;
 	},
 
 	selectByIdsAndSendType(c, permKey, sendType) {
@@ -176,13 +188,20 @@ const roleService = {
 		return orm(c).select().from(role).where(eq(role.name, roleName)).get();
 	},
 
-	selectByUserIds(c, userIds) {
+	async selectByUserIds(c, userIds) {
 
-		if (!userIds && userIds.length === 0) {
+		if (!userIds || userIds.length === 0) {
 			return [];
 		}
 
-		return orm(c).select({ ...role, userId: user.userId }).from(user).leftJoin(role, eq(role.roleId, user.type)).where(inArray(user.userId, userIds)).all();
+		const roleList = [];
+		// 站内群发和后台统计都会一次查很多用户角色，这里统一走分块。
+		for (const batch of chunkArray([...new Set(userIds)])) {
+			const rows = await orm(c).select({ ...role, userId: user.userId }).from(user).leftJoin(role, eq(role.roleId, user.type)).where(inArray(user.userId, batch)).all();
+			roleList.push(...rows);
+		}
+
+		return roleList;
 
 	},
 

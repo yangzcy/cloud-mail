@@ -101,6 +101,7 @@ const publicService = {
 
 		if (list.length === 0) return;
 
+		// 公共导入接口会批量创建用户，这里先统一校验邮箱和密码，再逐条落库。
 		for (const emailRow of list) {
 			if (!verifyUtils.isEmail(emailRow.email)) {
 				throw new BizError(t('notEmail'));
@@ -131,6 +132,7 @@ const publicService = {
 			let type = defRole.roleId;
 
 			if (roleName) {
+				// 导入时允许按角色名映射角色；找不到则退回默认角色。
 				const roleRow = roleList.find(role => role.name === roleName);
 				type = roleRow ? roleRow.roleId : type;
 			}
@@ -205,6 +207,7 @@ const publicService = {
 
 	async genToken(c, params) {
 
+		// 先验证管理员身份，再下发新的公共接口 token。
 		await this.verifyUser(c, params)
 
 		const uuid = uuidv4();
@@ -218,6 +221,7 @@ const publicService = {
 
 		const { email, password } = params
 
+		// 公共 token 只能由管理员主账号签发，避免普通用户拿到导入能力。
 		const userRow = await userService.selectByEmailIncludeDel(c, email);
 
 		if (email !== c.env.admin) {

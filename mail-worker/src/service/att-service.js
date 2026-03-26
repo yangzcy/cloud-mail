@@ -9,6 +9,7 @@ import { parseHTML } from 'linkedom';
 import { v4 as uuidv4 } from 'uuid';
 import domainUtils from '../utils/domain-uitls';
 import settingService from "./setting-service";
+import { chunkArray, SQLITE_BATCH_STATEMENT_CHUNK_SIZE } from '../utils/batch-utils';
 
 const attService = {
 
@@ -195,41 +196,55 @@ const attService = {
 	},
 
 	selectByEmailIds(c, emailIds) {
-		return orm(c).select().from(att).where(
-			and(
-				inArray(att.emailId, emailIds),
-				eq(att.type, attConst.type.ATT)
-			))
-			.all();
+		if (!emailIds || emailIds.length === 0) {
+			return [];
+		}
+
+		// 附件查询经常跟随邮件批量操作一起触发，按邮件 ID 分块可以避免查询参数过长。
+		const tasks = chunkArray([...new Set(emailIds)]).map(batch => {
+			return orm(c).select().from(att).where(
+				and(
+					inArray(att.emailId, batch),
+					eq(att.type, attConst.type.ATT)
+				))
+				.all();
+		});
+
+		return Promise.all(tasks).then(results => results.flat());
 	},
 
 	async removeAttByField(c, fieldName, fieldValues) {
+		if (!fieldValues || fieldValues.length === 0) {
+			return;
+		}
 
-		const sqlList = [];
+		const delKeyList = [];
 
-		fieldValues.forEach(value => {
+		// 这里要先找出“只被当前删除范围唯一引用”的对象 key，再删数据库记录，最后删 R2。
+		// 由于 D1 的 db.batch(...) 比普通 IN (...) 更早触发变量限制，因此单独使用更小的分块大小。
+		for (const valueBatch of chunkArray(fieldValues, SQLITE_BATCH_STATEMENT_CHUNK_SIZE)) {
+			const sqlList = [];
 
-			sqlList.push(
+			valueBatch.forEach(value => {
+				sqlList.push(
+					c.env.db.prepare(
+						`SELECT a.key, a.att_id
+							FROM attachments a
+								   JOIN (SELECT key
+										 FROM attachments
+										 GROUP BY key
+										 HAVING COUNT (*) = 1) t
+										ON a.key = t.key
+							WHERE a.${fieldName} = ?;`
+						).bind(value)
+				);
 
-				c.env.db.prepare(
-					`SELECT a.key, a.att_id
-						FROM attachments a
-							   JOIN (SELECT key
-									 FROM attachments
-									 GROUP BY key
-									 HAVING COUNT (*) = 1) t
-									ON a.key = t.key
-						WHERE a.${fieldName} = ?;`
-					).bind(value)
-			)
+				sqlList.push(c.env.db.prepare(`DELETE FROM attachments WHERE ${fieldName} = ?`).bind(value));
+			});
 
-			sqlList.push(c.env.db.prepare(`DELETE FROM attachments WHERE ${fieldName} = ?`).bind(value))
-
-		});
-
-		const attListResult = await c.env.db.batch(sqlList);
-
-		const delKeyList = attListResult.flatMap(r => r.results ? r.results.map(row => row.key) : []);
+			const attListResult = await c.env.db.batch(sqlList);
+			delKeyList.push(...attListResult.flatMap(r => r.results ? r.results.map(row => row.key) : []));
+		}
 
 		if (delKeyList.length > 0) {
 			await this.batchDelete(c, delKeyList);
@@ -249,6 +264,15 @@ const attService = {
 
 	},
 
+	async clearAll(c) {
+		const attList = await orm(c).select({ key: att.key }).from(att).all();
+		const keys = [...new Set(attList.map(item => item.key).filter(Boolean))];
+		if (keys.length > 0) {
+			await this.batchDelete(c, keys);
+		}
+		await orm(c).delete(att).run();
+	},
+
 	async removeByAccountId(c, accountId) {
 		await this.removeAttByField(c, "account_id", [accountId])
 	},
@@ -261,7 +285,13 @@ const attService = {
 		if (!keys || keys.length === 0) {
 			return []
 		}
-		return orm(c).select().from(att).where(inArray(att.key, keys)).orderBy(desc(att.attId)).groupBy(att.key).all();
+
+		// 富文本内嵌图片会按 key 回查附件信息，key 很多时同样需要分块。
+		const tasks = chunkArray([...new Set(keys)]).map(batch => {
+			return orm(c).select().from(att).where(inArray(att.key, batch)).orderBy(desc(att.attId)).groupBy(att.key).all();
+		});
+
+		return Promise.all(tasks).then(results => results.flat());
 	}
 };
 

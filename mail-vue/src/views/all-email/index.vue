@@ -57,6 +57,9 @@
         <Icon class="icon" @click="changeTimeSort" icon="material-symbols-light:timer-arrow-up-outline" v-else
               width="28" height="28"/>
         <Icon class="icon clear" icon="fluent:broom-sparkle-16-regular" width="22" height="22" @click="openBathDelete"/>
+        <el-button class="purge-button" type="danger" plain @click="deleteAllEmails" :loading="clearAllLoading">
+          {{ t('deleteAllEmails') }}
+        </el-button>
       </template>
     </emailScroll>
     <el-dialog v-model="showBathDelete" :title="$t('clearEmail')" width="335"
@@ -96,6 +99,7 @@ import {
   allEmailList,
   allEmailDelete,
   allEmailBatchDelete,
+  allEmailDeleteAll,
   allEmailLatest
 } from "@/request/all-email.js";
 import {Icon} from "@iconify/vue";
@@ -120,6 +124,7 @@ const searchValue = ref('')
 const mySelect = ref()
 const showBathDelete = ref(false)
 const clearLoading = ref(false)
+const clearAllLoading = ref(false)
 
 onMounted(() => {
   latest();
@@ -194,11 +199,13 @@ function openBathDelete() {
 function batchDelete() {
 
   if (clearTime.value) {
+    // 日期组件给的是本地时间范围，提交到后端前统一转成完整的起止时间字符串。
     clearParams.startTime = toUtc(clearTime.value[0]).format("YYYY-MM-DD HH:mm:ss")
     clearParams.endTime = toUtc(clearTime.value[1]).add(1, 'day').format("YYYY-MM-DD HH:mm:ss")
   }
 
   if (!clearParams.sendEmail && !clearParams.sendName && !clearParams.subject && !clearParams.toEmail && !clearTime.value) {
+    // 没有任何筛选条件时不允许直接批量清空，避免误触造成全库邮件误删。
     showBathDelete.value = false
     return
   }
@@ -214,6 +221,7 @@ function batchDelete() {
     clearLoading.value = true
 
     allEmailBatchDelete(clearParams).then(() => {
+      // 条件批量删除后保留当前搜索上下文，只刷新列表和清空弹窗内的清理条件。
       ElMessage({
         message: t('clearSuccess'),
         type: "success",
@@ -223,6 +231,29 @@ function batchDelete() {
       sysEmailScroll.value.refreshList();
     }).finally(() => {
       clearLoading.value = false
+    })
+  })
+}
+
+function deleteAllEmails() {
+  // 这是管理员级全量清理动作，会删除全部邮件、附件和星标，但不会删除账号。
+  ElMessageBox.confirm(`${t('deleteAllEmailsDesc')}<br><br><b>${t('deleteAllEmailsKeepHint')}</b>`, {
+    confirmButtonText: t('confirm'),
+    cancelButtonText: t('cancel'),
+    type: 'warning',
+    dangerouslyUseHTMLString: true,
+    title: t('deleteAllEmailsConfirm')
+  }).then(() => {
+    clearAllLoading.value = true
+    allEmailDeleteAll().then(() => {
+      ElMessage({
+        message: t('deleteAllEmailsSuccess'),
+        type: "success",
+        plain: true
+      })
+      sysEmailScroll.value.refreshList();
+    }).finally(() => {
+      clearAllLoading.value = false
     })
   })
 }
@@ -395,6 +426,14 @@ async function latest() {
   height: 100%;
   width: 100%;
   overflow: hidden;
+
+  .purge-button {
+    margin-left: auto;
+    min-width: 132px;
+    border-radius: 999px;
+    font-weight: 600;
+    box-shadow: 0 10px 24px rgba(245, 108, 108, 0.12);
+  }
 }
 
 

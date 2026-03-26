@@ -12,6 +12,7 @@ import verifyRecordService from './verify-record-service';
 const settingService = {
 
 	async refresh(c) {
+		// 数据库存档是最终真值，刷新时同步写回 KV，供高频读取接口直接命中缓存。
 		const settingRow = await orm(c).select().from(setting).get();
 		settingRow.resendTokens = JSON.parse(settingRow.resendTokens);
 		c.set('setting', settingRow);
@@ -21,6 +22,7 @@ const settingService = {
 	async query(c) {
 
 		if (c.get?.('setting')) {
+			// 同一请求生命周期内优先复用上下文缓存，避免重复读 KV/重复解析。
 			return c.get('setting')
 		}
 
@@ -45,6 +47,7 @@ const settingService = {
 		}
 
 		domainList = domainList.map(item => '@' + item);
+		// 前端统一使用带 @ 的域名格式，便于直接拼接展示和校验。
 		setting.domainList = domainList;
 
 
@@ -90,6 +93,7 @@ const settingService = {
 
 
 		if (!showSiteKey) {
+			// 管理设置查询默认脱敏密钥，避免前端二次保存时误拿到完整 secret。
 			settingRow.siteKey = settingRow.siteKey ? `${settingRow.siteKey.slice(0, 6)}******` : null;
 		}
 
@@ -107,6 +111,7 @@ const settingService = {
 		let addVerifyOpen = false
 
 		recordList.forEach(row => {
+			// 根据当前 IP 的验证计数，告诉前端此刻是否需要展示 Turnstile。
 			if (row.type === verifyRecordType.REG) {
 				regVerifyOpen = row.count >= settingRow.regVerifyCount
 			}
@@ -125,6 +130,7 @@ const settingService = {
 
 	async set(c, params) {
 		const settingData = await this.query(c);
+		// resend token 采用增量合并，便于单个域名单独修改而不覆盖整份配置。
 		let resendTokens = { ...settingData.resendTokens, ...params.resendTokens };
 		Object.keys(resendTokens).forEach(domain => {
 			if (!resendTokens[domain]) delete resendTokens[domain];
@@ -170,7 +176,7 @@ const settingService = {
 			const arrayBuffer = await file.arrayBuffer();
 			background = constant.BACKGROUND_PREFIX + await fileUtils.getBuffHash(arrayBuffer) + fileUtils.getExtFileName(file.name);
 
-
+			// 本地上传的背景图统一落到对象存储，再只在设置表里保存 key。
 			await r2Service.putObj(c, background, arrayBuffer, {
 				contentType: file.type,
 				cacheControl: `public, max-age=31536000, immutable`,
@@ -186,6 +192,7 @@ const settingService = {
 
 	async websiteConfig(c) {
 
+		// 公开站点配置只返回前端首屏需要的字段，不暴露后台敏感配置。
 		const settingRow = await this.get(c, true);
 
 		return {

@@ -861,6 +861,7 @@ getUpdate()
 function getSettings() {
   settingQuery().then(settingData => {
     setting.value = settingData
+    // 域名列表会被账号创建、写信等多个页面复用，因此在这里同步进全局 settingStore。
     settingStore.domainList = settingData.domainList;
     resendTokenForm.domain = setting.value.domainList[0]
     loginOpacity.value = setting.value.loginOpacity
@@ -925,6 +926,7 @@ const resendList = computed(() => {
 
 function getUpdate() {
   if (getUpdateErrorCount > 5 || !getUpdateErrorCount) return
+  // 这里只做非阻塞版本检查，失败后最多重试几次，不影响设置页主体功能。
   axios.get('https://api.github.com/repos/maillab/cloud-mail/releases/latest').then(({data}) => {
     hasUpdate.value = data.name !== currentVersion
     getUpdateErrorCount = 0
@@ -1036,6 +1038,7 @@ function openForwardRules() {
 }
 
 function emailAddTag(val) {
+  // 支持一次粘贴多个转发邮箱，统一按中英文逗号拆分并去重。
   const emails = Array.from(new Set(
       val.split(/[,，]/).map(item => item.trim()).filter(item => item)
   ));
@@ -1050,6 +1053,7 @@ function emailAddTag(val) {
 }
 
 function ruleEmailAddTag(val) {
+  // 规则邮箱同样支持批量粘贴输入。
   const emails = Array.from(new Set(
       val.split(/[,，]/).map(item => item.trim()).filter(item => item)
   ));
@@ -1065,6 +1069,7 @@ function ruleEmailAddTag(val) {
 
 function addChatTag(val) {
 
+  // Telegram chatId 只接受数字，非数字输入会被直接丢弃。
   const chatIds = Array.from(new Set(
       val.split(/[,，]/).map(item => item.trim()).filter(item => item)
   ));
@@ -1080,6 +1085,7 @@ function addChatTag(val) {
 
 function clearS3() {
 
+  // 清空 S3 配置时显式写入空值，让后端覆盖已有配置。
   const form = {
     bucket: '',
     endpoint: '',
@@ -1140,6 +1146,7 @@ function ruleEmailSave() {
 function doOpacityChange() {
   const form = {}
   form.loginOpacity = loginOpacity.value
+  // 透明度调整频率高，交给 debounce 包装后再落库。
   editSetting(form, true)
 }
 
@@ -1190,6 +1197,7 @@ async function saveBackground() {
   let image = ''
 
   if (localUpShow.value) {
+    // 本地上传时转成 base64 发给后端，由后端统一写入对象存储。
     image = await fileToBase64(backgroundFile, true);
   } else {
     if (backgroundUrl.value && !backgroundUrl.value.startsWith('http')) {
@@ -1249,12 +1257,14 @@ function saveResendToken() {
   const settingForm = {
     resendTokens: {}
   }
+  // 后端保存 resend token 时 key 不带 @，这里只在提交前把展示值转换掉。
   const domain = resendTokenForm.domain.slice(1)
   settingForm.resendTokens[domain] = resendTokenForm.token
   editSetting(settingForm)
 }
 
 function backupSetting() {
+  // 开关类配置变更前先备份一份，接口失败时可直接回滚界面状态。
   const settingForm = {...setting.value}
   delete settingForm.resendTokens
   delete settingForm.siteKey
@@ -1273,6 +1283,7 @@ function beforeChange() {
 }
 
 function change(e) {
+  // 通用开关保存入口：把当前 setting 快照提交给后端，但剔除敏感字段和独立编辑字段。
   const settingForm = {...setting.value}
   delete settingForm.siteKey
   delete settingForm.secretKey
@@ -1305,9 +1316,11 @@ function editSetting(settingForm, refreshStatus = true) {
       plain: true
     })
     if (setting.value.manyEmail === 1) {
+      // 关闭多账号模式后，当前账号必须回退到主账号，避免界面继续停留在已隐藏的别名账号。
       accountStore.currentAccountId = userStore.user.account.accountId;
     }
     if (refreshStatus) {
+      // 某些设置会影响前端运行态，保存后重新拉取可避免局部状态与后端配置脱节。
       getSettings()
     }
     editTitleShow.value = false
@@ -1323,6 +1336,7 @@ function editSetting(settingForm, refreshStatus = true) {
     addS3Show.value = false
     emailPrefixShow.value = false
   }).catch((e) => {
+    // 保存失败时恢复本地备份，避免开关状态和真实后端配置不一致。
     loginOpacity.value = setting.value.loginOpacity
     setting.value = {...setting.value, ...JSON.parse(backup)}
   }).finally(() => {

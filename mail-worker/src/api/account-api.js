@@ -8,12 +8,8 @@ app.get('/account/list', async (c) => {
 	return c.json(result.ok(list));
 });
 
-app.get('/account/selectableIds', async (c) => {
-	const ids = await accountService.selectableIds(c, userContext.getUserId(c));
-	return c.json(result.ok(ids));
-});
-
 app.delete('/account/delete', async (c) => {
+	// 当前用户在账号页执行批量删除的入口。
 	await accountService.delete(c, c.req.query(), userContext.getUserId(c));
 	return c.json(result.ok());
 });

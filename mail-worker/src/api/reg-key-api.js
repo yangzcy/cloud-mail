@@ -14,11 +14,13 @@ app.get('/regKey/list', async (c) => {
 })
 
 app.delete('/regKey/delete', async (c) => {
+	// 注册码管理页的批量删除入口。
 	await regKeyService.delete(c, c.req.query());
 	return c.json(result.ok());
 })
 
 app.delete('/regKey/clearNotUse', async (c) => {
+	// 清理已用尽或已过期注册码的快捷入口。
 	await regKeyService.clearNotUse(c);
 	return c.json(result.ok());
 })

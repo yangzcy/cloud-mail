@@ -7,6 +7,7 @@ import email from '../entity/email';
 import { isDel } from '../const/entity-const';
 import attService from "./att-service";
 import { t } from '../i18n/i18n'
+import { chunkArray } from '../utils/batch-utils';
 const starService = {
 
 	async add(c, params, userId) {
@@ -76,7 +77,29 @@ const starService = {
 		return { list };
 	},
 	async removeByEmailIds(c, emailIds) {
-		await orm(c).delete(star).where(inArray(star.emailId, emailIds)).run();
+		if (!emailIds || emailIds.length === 0) {
+			return;
+		}
+
+		// 星标会在邮件硬删除前一并清理，按邮件 ID 分块删除可以避免批量操作超限。
+		for (const batch of chunkArray(emailIds)) {
+			await orm(c).delete(star).where(inArray(star.emailId, batch)).run();
+		}
+	},
+
+	async removeByUserIds(c, userIds) {
+		if (!userIds || userIds.length === 0) {
+			return;
+		}
+
+		// 一键清理用户时，用户关联的星标也要同步回收。
+		for (const batch of chunkArray(userIds)) {
+			await orm(c).delete(star).where(inArray(star.userId, batch)).run();
+		}
+	},
+
+	async clearAll(c) {
+		await orm(c).delete(star).run();
 	}
 };
 

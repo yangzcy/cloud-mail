@@ -8,6 +8,7 @@ import { verifyRecordType } from '../const/entity-const';
 const verifyRecordService = {
 
 	async selectListByIP(c) {
+		// 验证记录按 IP 维度统计，供注册/加号流程动态决定是否开启人机验证。
 		const ip = reqUtils.getIp(c)
 		return orm(c).select().from(verifyRecord).where(eq(verifyRecord.ip, ip)).all();
 	},
@@ -24,6 +25,7 @@ const verifyRecordService = {
 
 		if (row) {
 			if (row.count >= regVerifyCount){
+				// 只有达到阈值后，当前 IP 的后续注册才强制要求 Turnstile。
 				return true
 			}
 
@@ -42,6 +44,7 @@ const verifyRecordService = {
 		if (row) {
 
 			if (row.count >= addVerifyCount){
+				// 新增账号流程与注册流程分别统计，避免互相影响阈值。
 				return true
 			}
 
@@ -59,6 +62,7 @@ const verifyRecordService = {
 		const now = dayjs().format('YYYY-MM-DD HH:mm:ss');
 
 		if (row) {
+			// 已有记录则原子自增，否则创建一条新的 IP 统计记录。
 			return  orm(c).update(verifyRecord).set({
 				count: sql`${verifyRecord.count}
 		+ 1`, updateTime: now

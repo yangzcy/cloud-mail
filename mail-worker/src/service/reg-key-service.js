@@ -6,6 +6,7 @@ import BizError from '../error/biz-error';
 import { formatDetailDate, toUtc } from '../utils/date-uitil';
 import userService from './user-service';
 import { t } from '../i18n/i18n.js';
+import { chunkArray } from '../utils/batch-utils';
 
 const regKeyService = {
 
@@ -43,8 +44,11 @@ const regKeyService = {
 
 	async delete(c, params) {
 		let {regKeyIds} = params;
-		regKeyIds = regKeyIds.split(',').map(id => Number(id));
-		await orm(c).delete(regKey).where(inArray(regKey.regKeyId,regKeyIds)).run();
+		regKeyIds = regKeyIds.split(',').map(id => Number(id)).filter(id => Number.isInteger(id) && id > 0);
+		// 注册码列表支持批量删除，ID 数量过多时按块删除更安全。
+		for (const batch of chunkArray(regKeyIds)) {
+			await orm(c).delete(regKey).where(inArray(regKey.regKeyId, batch)).run();
+		}
 	},
 
 	async clearNotUse(c) {

@@ -2,7 +2,15 @@
   <div class="account-box">
     <div class="head-opt">
       <Icon v-perm="'account:add'" class="icon add" icon="ion:add-outline" width="23" height="23" @click="add"/>
-      <Icon v-if="hasPerm('account:delete')" class="icon refresh" :icon="batchMode ? 'mdi:checkbox-multiple-marked-outline' : 'mdi:checkbox-multiple-blank-outline'" width="20" height="20" @click="toggleBatchMode"/>
+      <button
+        v-if="hasPerm('account:delete')"
+        class="batch-toggle"
+        type="button"
+        @click="toggleBatchMode"
+      >
+        <Icon :icon="batchMode ? 'mdi:checkbox-multiple-marked-outline' : 'mdi:checkbox-multiple-blank-outline'" width="18" height="18" />
+        <span>{{ batchMode ? t('exitBatch') : t('batchManage') }}</span>
+      </button>
       <div v-if="batchMode && hasPerm('account:delete')" class="batch-toolbar">
         <button class="batch-pill" :disabled="selectableAccountIds.length === 0" @click="selectCurrentList">
           {{ t('selectCurrentList') }}
@@ -356,6 +364,7 @@ function blurAction(event) {
 function toggleBatchMode() {
   batchMode.value = !batchMode.value
   if (!batchMode.value) {
+    // 退出批量模式时立即清空选择，避免重新进入时沿用旧的跨分页勾选结果。
     selectedAccountIds.value = []
     selectAllMode.value = false
   }
@@ -369,6 +378,7 @@ function selectCurrentList(event) {
 
 async function selectAllAccounts(event) {
   blurAction(event)
+  // 当前列表可能只加载了部分账号，这里向后端请求全部可选账号 ID，实现真正的“全选全部结果”。
   const ids = await accountSelectableIds()
   selectedAccountIds.value = ids
   selectAllMode.value = true
@@ -393,6 +403,7 @@ function resetCurrentAccountIfDeleted(accountIds) {
     return
   }
 
+  // 如果当前正在查看的账号被删掉，需要立刻切换到剩余账号，否则右侧邮件视图会指向不存在的账号。
   const fallbackAccount = accounts.find(item => !accountIds.includes(item.accountId)) || userStore.user.account
   accountStore.currentAccountId = fallbackAccount.accountId
   accountStore.currentAccount = fallbackAccount
@@ -404,6 +415,7 @@ function batchRemove(event) {
     return
   }
 
+  // 批量删除支持当前页和“全选全部结果”两种模式，最终都以 accountId 列表提交。
   ElMessageBox.confirm(t('delAccountsConfirm', { msg: selectedAccountIds.value.length }), {
     confirmButtonText: t('confirm'),
     cancelButtonText: t('cancel'),
@@ -413,6 +425,7 @@ function batchRemove(event) {
       const deletingIds = [...selectedAccountIds.value]
       resetCurrentAccountIfDeleted(deletingIds)
       toggleBatchMode()
+      // 本地列表直接剔除已删账号，避免必须整页重拉才能看到结果。
       const removableIdSet = new Set(deletingIds)
       for (let i = accounts.length - 1; i >= 0; i--) {
         if (removableIdSet.has(accounts[i].accountId)) {
@@ -683,6 +696,28 @@ path[fill="#ffdda1"] {
       margin-left: 10px;
     }
 
+    .batch-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: 10px;
+      border: 1px solid var(--el-border-color);
+      background: var(--el-fill-color-light);
+      color: var(--el-text-color-primary);
+      border-radius: 999px;
+      padding: 5px 12px;
+      font-size: 12px;
+      line-height: 1;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .batch-toggle:hover {
+      background: var(--el-fill-color);
+      border-color: var(--el-color-primary-light-5);
+      color: var(--el-color-primary);
+    }
+
     .batch-toolbar {
       display: inline-flex;
       align-items: center;
@@ -743,6 +778,10 @@ path[fill="#ffdda1"] {
       .batch-toolbar {
         width: 100%;
         margin-left: 0;
+      }
+
+      .batch-toggle {
+        margin-left: 10px;
       }
 
       .refresh {

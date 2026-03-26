@@ -24,6 +24,9 @@
             height="28"/>
       <Icon class="icon" icon="ion:reload" width="18" height="18" @click="refresh"/>
       <Icon class="icon" icon="uiw:delete" width="16" height="16" @click="delUser"/>
+      <el-button class="purge-button" type="danger" plain @click="deleteAllUsers" :loading="deleteAllLoading">
+        {{ t('deleteAllUsers') }}
+      </el-button>
     </div>
     <el-scrollbar ref="scrollbarRef" class="scrollbar">
       <div>
@@ -189,10 +192,14 @@
     </el-dialog>
     <el-dialog class="account-dialog" v-model="accountShow" :title="t('userAccount')" @closed="resetAccountList" >
       <div class="account-table-actions">
-        <el-button type="danger" plain size="small" @click="deleteSelectedAccounts">{{ t('delete') }}</el-button>
+        <el-button plain size="small" :disabled="accountList.length === 0" @click="selectCurrentAccountPage">{{ t('selectCurrentPage') }}</el-button>
+        <el-button plain size="small" :disabled="accountParams.total === 0 || selectAllUserAccounts" @click="selectAllAccountResults">{{ t('selectAllAccounts') }}</el-button>
+        <el-button plain size="small" :disabled="selectedAccountIds.length === 0" @click="clearAccountSelection">{{ t('clearSelection') }}</el-button>
+        <div class="account-selection-count">{{ accountSelectionText }}</div>
+        <el-button type="danger" plain size="small" :disabled="selectedAccountIds.length === 0" @click="deleteSelectedAccounts">{{ t('delete') }}</el-button>
       </div>
-      <el-table ref="accountTableRef" :data="accountList" style="height: 480px" v-loading="accountLoading" element-loading-background="transparent" :empty-text="accountLoading ? '' : null">
-        <el-table-column type="selection" width="48" />
+      <el-table ref="accountTableRef" :data="accountList" row-key="accountId" style="height: 480px" v-loading="accountLoading" element-loading-background="transparent" :empty-text="accountLoading ? '' : null" @selection-change="handleAccountSelectionChange">
+        <el-table-column type="selection" width="48" :reserve-selection="true" />
         <el-table-column property="email" :label="t('emailAccount')" >
           <template #default="props">
             <div class="email-row">{{ props.row.email }}</div>
@@ -380,7 +387,9 @@ import {
   userRestSendCount,
   userRestore,
   userDeleteAccount,
-  userAllAccount
+  userAllAccount,
+  userAllAccountIds,
+  userDeleteAll
 } from '@/request/user.js'
 import {roleSelectUse} from "@/request/role.js";
 import {Icon} from "@iconify/vue";
@@ -391,6 +400,7 @@ import {isEmail} from "@/utils/verify-utils.js";
 import {useRoleStore} from "@/store/role.js";
 import {useUserStore} from "@/store/user.js";
 import {useI18n} from 'vue-i18n';
+import {computed, nextTick} from 'vue';
 
 defineOptions({
   name: 'user'
@@ -423,6 +433,7 @@ const total = ref(0)
 const first = ref(true)
 const scrollbarRef = ref(null)
 const accountLoading = ref(false)
+const deleteAllLoading = ref(false)
 const dropdownRef = ref(null);
 const dropdownShow = ref(false);
 const rightClickUser = ref({});
@@ -473,11 +484,19 @@ const roleList = reactive([])
 const mySelect = ref({})
 const accountTableRef = ref({})
 const accountList = reactive([])
+const selectedAccountIds = ref([])
+const selectAllUserAccounts = ref(false)
 const accountParams = reactive({
   size: 10,
   num: 0,
   total: 0,
   userId: 0,
+})
+const accountSelectionText = computed(() => {
+  if (selectAllUserAccounts.value) {
+    return t('allAccountsSelected', { msg: selectedAccountIds.value.length })
+  }
+  return t('selectedCount', { msg: selectedAccountIds.value.length })
 })
 
 roleSelectUse().then(list => {
@@ -487,11 +506,29 @@ roleSelectUse().then(list => {
 
 const paramsStar = localStorage.getItem('user-params')
 if (paramsStar) {
-  const localParams = JSON.parse(paramsStar)
-  params.num = localParams.num
-  params.size = localParams.size
-  params.timeSort = localParams.timeSort
-  params.status = localParams.status
+  try {
+    const localParams = JSON.parse(paramsStar)
+    const validStatus = [-2, -1, 0, 1]
+    const validSize = [10, 15, 20, 25, 30, 50]
+
+    if (Number.isInteger(localParams.num) && localParams.num > 0) {
+      params.num = localParams.num
+    }
+
+    if (validSize.includes(localParams.size)) {
+      params.size = localParams.size
+    }
+
+    if (localParams.timeSort === 0 || localParams.timeSort === 1) {
+      params.timeSort = localParams.timeSort
+    }
+
+    if (validStatus.includes(localParams.status)) {
+      params.status = localParams.status
+    }
+  } catch (error) {
+    localStorage.removeItem('user-params')
+  }
 }
 
 watch(() => params, () => {
@@ -563,7 +600,9 @@ function deleteAccount(accounts) {
     return
   }
 
-  const message = accountRows.length === 1 ? t('delConfirm', {msg: accountRows[0].email}) : t('delEmailsConfirm')
+  const message = accountRows.length === 1
+    ? t('delOneAccountConfirm', {msg: accountRows[0].email})
+    : t('delUserAccountsConfirm')
 
   ElMessageBox.confirm(message, {
     confirmButtonText: t('confirm'),
@@ -571,20 +610,79 @@ function deleteAccount(accounts) {
     type: 'warning'
   }).then(() => {
     userDeleteAccount(accountIds).then(() => {
-      getAccountList()
-      ElMessage({
-        message: t('delSuccessMsg'),
+      const deletedCount = accountIds.length
+      if (selectAllUserAccounts.value) {
+        accountParams.total = Math.max(accountParams.total - deletedCount, 0)
+      }
+      clearAccountSelection()
+      getAccountList(true)
+      ElNotification({
+        title: t('delete'),
+        message: accountRows.length === 1 ? t('delOneAccountSuccess') : t('delUserAccountsSuccess', { msg: deletedCount }),
         type: "success",
-        plain: true
+        duration: 2600
       })
     })
   });
 }
 
-function deleteSelectedAccounts() {
-  const rows = accountTableRef.value.getSelectionRows?.() || []
-  deleteAccount(rows)
+function handleAccountSelectionChange(rows) {
+  selectedAccountIds.value = rows.map(row => row.accountId)
+  if (!rows.length) {
+    selectAllUserAccounts.value = false
+  }
 }
+
+function blurAction(event) {
+  event?.currentTarget?.blur?.()
+}
+
+function syncAccountSelection() {
+  nextTick(() => {
+    // 账号列表翻页、刷新后，表格内部选中状态会丢失，这里用 accountId 重新同步勾选结果。
+    const selectedIdSet = new Set(selectedAccountIds.value)
+    accountTableRef.value?.clearSelection?.()
+    accountList.forEach(item => {
+      if (selectedIdSet.has(item.accountId)) {
+        accountTableRef.value?.toggleRowSelection?.(item, true)
+      }
+    })
+  })
+}
+
+function selectCurrentAccountPage(event) {
+  blurAction(event)
+  selectedAccountIds.value = accountList.map(item => item.accountId)
+  selectAllUserAccounts.value = false
+  syncAccountSelection()
+}
+
+async function selectAllAccountResults(event) {
+  blurAction(event)
+  // 当前页“全选”只覆盖当前分页，这里额外向后端拉取该用户全部账号 ID，用于跨分页批量删除。
+  const ids = await userAllAccountIds(accountParams.userId)
+  selectedAccountIds.value = ids
+  selectAllUserAccounts.value = true
+  syncAccountSelection()
+}
+
+function clearAccountSelection(event) {
+  blurAction(event)
+  selectedAccountIds.value = []
+  selectAllUserAccounts.value = false
+  accountTableRef.value?.clearSelection?.()
+}
+
+function deleteSelectedAccounts() {
+  if (!selectedAccountIds.value.length) {
+    return
+  }
+  // 已选中的账号不一定都在当前页，所以兜底构造 { accountId } 传给删除逻辑。
+  deleteAccount(selectedAccountIds.value.map(accountId => {
+    return accountList.find(item => item.accountId === accountId) || { accountId }
+  }))
+}
+
 function accountCurChange(e) {
   accountParams.num = e
   getAccountList()
@@ -595,6 +693,9 @@ function resetAccountList() {
   accountParams.num = 0
   accountParams.size = 10
   accountParams.total = 0
+  accountParams.userId = 0
+  selectedAccountIds.value = []
+  selectAllUserAccounts.value = false
   accountTableRef.value?.clearSelection?.()
 }
 
@@ -615,6 +716,8 @@ function getAccountList(loading = false) {
     accountList.length = 0
     accountList.push(...list)
     accountParams.total = total
+    // 分页数据刷新后，需要把之前保存在 selectedAccountIds 中的选择状态重新打回表格。
+    syncAccountSelection()
     accountLoading.value = false
   })
 }
@@ -835,6 +938,7 @@ function delUser(user) {
   if (userIds.length === 0) {
     return;
   }
+  // 这里删除的是用户主记录，对应后端会继续级联清理账号、邮件、附件、OAuth 等数据。
   ElMessageBox.confirm(t('delUsersConfirm'), {
     confirmButtonText: t('confirm'),
     cancelButtonText: t('cancel'),
@@ -868,6 +972,34 @@ function delOneUser(user) {
   });
 }
 
+function deleteAllUsers() {
+  // “一键清理用户”是管理员高风险操作，只清理普通用户并保留管理员链路相关账号。
+  ElMessageBox.confirm(`${t('deleteAllUsersDesc')}<br><br><b>${t('deleteAllUsersKeepHint')}</b>`, {
+    confirmButtonText: t('confirm'),
+    cancelButtonText: t('cancel'),
+    type: 'warning',
+    dangerouslyUseHTMLString: true,
+    title: t('deleteAllUsersConfirm')
+  }).then(() => {
+    deleteAllLoading.value = true
+    userDeleteAll().then(({ deletedUserCount }) => {
+      // 清理完成后要同时重置用户表格选择状态和账号弹窗的局部选择状态，避免界面残留旧 ID。
+      clearAccountSelection()
+      tableRef.value?.clearSelection?.()
+      params.num = 1
+      getUserList(true)
+      ElNotification({
+        title: t('delete'),
+        message: t('deleteAllUsersSuccess', { msg: deletedUserCount }),
+        type: 'success',
+        duration: 2800
+      })
+    }).finally(() => {
+      deleteAllLoading.value = false
+    })
+  })
+}
+
 function restore(user) {
 
   const type = ref(0)
@@ -877,13 +1009,6 @@ function restore(user) {
     cancelButtonText: t('cancel'),
     message: () => h('div', [
       h('div', {class: 'mb-2'}, t('restoreConfirm', {msg: user.email}))
-      // h(ElRadioGroup, {
-      //   modelValue: type.value,
-      //   'onUpdate:modelValue': (val) => (type.value = val),
-      // }, [
-      //   h(ElRadio, {label: 'option1', value: 0}, t('normalRestore')),
-      //   h(ElRadio, {label: 'option2', value: 1}, t('allRestore')),
-      // ])
     ]),
     type: 'warning'
   }).then(() => {
@@ -1024,6 +1149,11 @@ function getUserList(loading = true) {
     newParams.isDel = 1
   }
   userList(newParams).then(data => {
+    if (params.num > 1 && data.total > 0 && data.list.length === 0) {
+      params.num = 1
+      getUserList(loading)
+      return
+    }
     users.value = data.list.map(item => ({...item, checkedClass: ''}))
     total.value = data.total
     scrollbarRef.value?.setScrollTop(0);
@@ -1128,6 +1258,14 @@ function adjustWidth() {
   .icon {
     cursor: pointer;
   }
+
+  .purge-button {
+    margin-left: auto;
+    min-width: 132px;
+    border-radius: 999px;
+    font-weight: 600;
+    box-shadow: 0 10px 24px rgba(245, 108, 108, 0.12);
+  }
 }
 
 .container {
@@ -1180,9 +1318,18 @@ function adjustWidth() {
 
 .account-table-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
   width: 100%;
   margin-bottom: 12px;
+}
+
+.account-selection-count {
+  font-size: 12px;
+  color: var(--secondary-text-color);
+  white-space: nowrap;
 }
 
 .pagination {

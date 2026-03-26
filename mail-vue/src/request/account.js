@@ -5,6 +5,7 @@ export function accountList(accountId, size, lastSort) {
 }
 
 export function accountSelectableIds() {
+    // 账号列表“全选全部结果”时使用，避免只选中当前已加载列表。
     return http.get('/account/selectableIds');
 }
 
@@ -18,6 +19,7 @@ export function accountSetName(accountId,name) {
 
 export function accountDelete(accountIds) {
     const ids = Array.isArray(accountIds) ? accountIds.join(',') : accountIds
+    // 当前用户账号页的批量删除入口。
     return http.delete('/account/delete', {params: {accountIds: ids}})
 }
 
