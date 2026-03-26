@@ -1,0 +1,35 @@
+name = "cloud-mail"
+main = "src/index.js"
+compatibility_date = "2025-06-04"
+
+[observability]
+enabled = true
+
+[[routes]]
+pattern = "cm.snacktruckmall.shop"
+custom_domain = true
+
+[[d1_databases]]
+binding = "db"
+database_name = "cloud-mail"
+database_id = "ab245a0f-8ab3-44f0-853c-52a118bdc9e5"
+
+[[kv_namespaces]]
+binding = "kv"
+id = "094b7d6d287d47758705910828b9f514"
+
+[[r2_buckets]]
+binding = "r2"
+bucket_name = "mail-eml"
+
+[assets]
+binding = "assets"
+directory = "./dist"
+not_found_handling = "single-page-application"
+run_worker_first = true
+
+[triggers]
+crons = ["0 16 * * *"]
+
+[build]
+command = "pnpm --prefix ../mail-vue install && pnpm --prefix ../mail-vue run build"
