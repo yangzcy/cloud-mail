@@ -124,6 +124,69 @@
 - KV 绑定 `kv`
 - R2 绑定 `r2`
 
+## 发布与同步流程
+
+### 远程约定
+
+- `origin`
+  自己的 fork，用于推送日常开发和版本发布。
+- `upstream`
+  官方仓库，用于同步上游更新。
+
+推荐检查命令：
+
+```bash
+git remote -v
+```
+
+### 只更新自己的远程仓库
+
+适用于当前不打算同步官方更新，只想把本地 `main` 和标签发布到自己的 fork：
+
+```bash
+git checkout main
+git status
+git pull --rebase origin main
+git push origin main
+git push origin v1.0
+git push origin 1.0 --force
+```
+
+说明：
+
+- `v1.0` 和 `1.0` 可以同时保留，兼容不同使用习惯。
+- 如果 `1.0` 标签没有改过指向，可以把 `--force` 去掉。
+
+### 同步官方更新后再发布
+
+适用于先吸收 `upstream/main` 的最新改动，再同步到自己的 fork：
+
+```bash
+git checkout main
+git status
+git fetch upstream
+git merge upstream/main
+git push origin main
+```
+
+如果需要发新标签：
+
+```bash
+git tag v1.1
+git tag 1.1
+git push origin v1.1
+git push origin 1.1
+```
+
+### 发布前最小检查项
+
+发布前至少确认以下几点：
+
+1. `git status` 为干净状态，或你明确知道未提交改动不会影响发布。
+2. `git log --oneline --max-count=5` 中最新提交就是准备发布的版本提交。
+3. `git remote -v` 中 `origin` 和 `upstream` 没有配反。
+4. 标签最终指向预期提交，必要时用 `git rev-parse 1.0 v1.0 main` 交叉确认。
+
 ## 新增功能时的建议
 
 - 新增批量接口时，先判断是否可能出现大数组，必要时直接复用 `chunkArray()`。

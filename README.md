@@ -43,6 +43,42 @@
 |-----------------------|-----------------------|
 | ![](/doc/demo/demo3.png) | ![](/doc/demo/demo4.png) |
 
+## 版本发布
+
+如果你是基于本项目维护自己的 fork，建议使用以下远程约定：
+
+- `origin`
+  自己的 fork，用于日常开发和发布。
+- `upstream`
+  官方仓库，用于获取上游更新。
+
+常用命令：
+
+```bash
+git remote -v
+git checkout main
+git pull --rebase origin main
+git push origin main
+```
+
+发布版本时建议同时保留两种标签格式：
+
+```bash
+git tag v1.0
+git tag 1.0
+git push origin v1.0
+git push origin 1.0
+```
+
+如果标签已经存在但需要改到新的提交，可强制更新：
+
+```bash
+git tag -f 1.0
+git push origin 1.0 --force
+```
+
+维护说明见 [`doc/maintenance.md`](/root/cloud-mail/doc/maintenance.md)。
+
 
 
 
@@ -151,6 +187,5 @@ cloud-mail
 ## 交流
 
 [Telegram](https://t.me/cloud_mail_tg)
-
 
 
