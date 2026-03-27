@@ -209,8 +209,6 @@ const en = {
     emptyRole: 'Role cannot be empty',
     emptyTimeMsg: 'Valid until time cannot be empty',
     emptyCountMsg: 'Available count cannot be empty',
-    invalidCountMsg: 'Available count must be an integer greater than 0',
-    customCountPlaceholder: 'Enter a custom positive integer',
     addSuccessMsg: 'Addition successful',
     delConfirm: 'Confirm deleting {msg}?',
     delUsersConfirm: 'Confirm deletion of selected users?',

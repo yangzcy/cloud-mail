@@ -40,7 +40,6 @@ const zh = {
 	isDelUser: '该邮箱已被注销',
 	isBanUser: '该邮箱已被禁用',
 	regKeyUseCount: '使用次数不能为空',
-	regKeyUseCountInvalid: '使用次数必须是大于 0 的整数',
 	emptyRegKeyExpire: '有效时间不能为空',
 	isExistRegKye: '注册码已存在',
 	roleNotExist: '权限身份不存在',

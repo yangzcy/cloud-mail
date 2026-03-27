@@ -75,12 +75,7 @@
             type="date"
             :placeholder="$t('validUntil')"
         />
-        <el-input
-            v-model.trim="addForm.count"
-            inputmode="numeric"
-            :placeholder="$t('customCountPlaceholder')"
-            clearable
-        />
+        <el-input-number v-model="addForm.count" :min="1" :max="99999"/>
         <el-button class="btn" type="primary" @click="submit" :loading="addLoading"
         >{{ $t('add') }}
         </el-button>
@@ -138,7 +133,7 @@ const isMobile = window.innerWidth < 1025
 
 const addForm = reactive({
   code: '',
-  count: '1',
+  count: 1,
   roleId: null,
   expireTime: null
 })
@@ -349,22 +344,8 @@ function submit() {
     return
   }
 
-  if (!/^[1-9]\d*$/.test(addForm.count)) {
-    ElMessage({
-      message: t('invalidCountMsg'),
-      type: "error",
-      plain: true
-    })
-    return
-  }
-
-  const submitForm = {
-    ...addForm,
-    count: Number(addForm.count)
-  }
-
   addLoading.value = true
-  regKeyAdd(submitForm).then(() => {
+  regKeyAdd(addForm).then(() => {
     showAdd.value = false
     resetForm()
     ElMessage({
@@ -397,9 +378,6 @@ function deleteRegKey(regKey) {
 
 function resetForm() {
   addForm.code = ''
-  addForm.count = '1'
-  addForm.roleId = null
-  addForm.expireTime = null
 }
 
 function openAdd() {

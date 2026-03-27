@@ -18,13 +18,8 @@ const regKeyService = {
 			throw new BizError(t('emptyRegKey'));
 		}
 
-		if (count === undefined || count === null || count === '') {
-			throw new BizError(t('regKeyUseCount'));
-		}
-
-		count = Number(count);
-		if (!Number.isInteger(count) || count <= 0) {
-			throw new BizError(t('regKeyUseCountInvalid'));
+		if (!count) {
+			throw new BizError(t('emptyRegKey'));
 		}
 
 		if (!expireTime) {

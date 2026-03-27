@@ -209,8 +209,6 @@ const zh = {
     emptyRole: '身份类型不能为空',
     emptyTimeMsg: '有效时间不能为空',
     emptyCountMsg: '可用次数不能为空',
-    invalidCountMsg: '可用次数必须是大于 0 的整数',
-    customCountPlaceholder: '请输入自定义正整数',
     addSuccessMsg: '添加成功',
     delConfirm: '确认删除{msg}吗?',
     delUsersConfirm: '确定删除选中的用户吗？',

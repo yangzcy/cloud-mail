@@ -40,7 +40,6 @@ const en = {
 	isDelUser: 'This email has been deleted',
 	isBanUser: 'This email has been banned',
 	regKeyUseCount: 'Usage count cannot be empty',
-	regKeyUseCountInvalid: 'Usage count must be an integer greater than 0',
 	emptyRegKeyExpire: 'Valid until time cannot be empty',
 	isExistRegKye: 'Invite code already exists',
 	roleNotExist: 'Role does not exist',
