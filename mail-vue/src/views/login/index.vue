@@ -260,37 +260,44 @@ function linuxDoLogin() {
 linuxDoGetUser();
 
 async function linuxDoGetUser() {
-
   const params = new URLSearchParams(window.location.search)
   const code = params.get('code')
+  const cleanUrl = window.location.origin + window.location.pathname
 
-  if (code) {
-
-    oauthLoading.value = true
-    oauthLinuxDoLogin(code).then(data => {
-
-      bindForm.oauthUserId = data.userInfo.oauthUserId;
-
-      if (!data.token) {
-        showBindForm.value = true
-        oauthLoading.value = false
-        ElMessage({
-          message: '请注册绑定一个邮箱',
-          type: 'warning',
-          duration: 4000,
-          plain: true,
-        })
-        return;
-      }
-
-      saveToken(data.token);
-    }).catch(() => {
-      oauthLoading.value = false
-    })
+  if (!code) {
+    return
   }
 
-  const cleanUrl = window.location.origin + window.location.pathname
-  window.history.replaceState({}, '', cleanUrl)
+  if (!settingStore.settings.linuxdoSwitch) {
+    window.history.replaceState({}, '', cleanUrl)
+    return
+  }
+
+  oauthLoading.value = true
+
+  try {
+    const data = await oauthLinuxDoLogin(code)
+
+    bindForm.oauthUserId = data.userInfo.oauthUserId;
+
+    if (!data.token) {
+      showBindForm.value = true
+      oauthLoading.value = false
+      ElMessage({
+        message: '请注册绑定一个邮箱',
+        type: 'warning',
+        duration: 4000,
+        plain: true,
+      })
+      return;
+    }
+
+    await saveToken(data.token);
+  } catch {
+    oauthLoading.value = false
+  } finally {
+    window.history.replaceState({}, '', cleanUrl)
+  }
 }
 
 function bind() {
