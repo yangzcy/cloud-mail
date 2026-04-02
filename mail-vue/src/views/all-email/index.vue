@@ -328,14 +328,14 @@ async function latest() {
   while (true) {
 
     let autoRefresh = settingStore.settings.autoRefresh;
-
-    await sleep(autoRefresh > 1 ? autoRefresh * 1000 : 3000);
-
-    const latestId = sysEmailScroll.value.latestEmail?.emailId
-
     if (autoRefresh < 2) {
+      await sleep(60000);
       continue
     }
+
+    await sleep(autoRefresh * 1000);
+
+    const latestId = sysEmailScroll.value.latestEmail?.emailId
 
     if (!latestId && latestId !== 0) {
       continue

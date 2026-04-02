@@ -78,7 +78,12 @@ async function latest() {
   while (true) {
 
     let autoRefresh = settingStore.settings.autoRefresh;
-    await sleep(autoRefresh > 1 ? autoRefresh * 1000 : 3000);
+    if (autoRefresh < 2) {
+      await sleep(60000);
+      continue;
+    }
+
+    await sleep(autoRefresh * 1000);
 
     if (route.name !== 'email') {
       continue;
@@ -86,7 +91,7 @@ async function latest() {
 
     const latestId = scroll.value.latestEmail?.emailId
 
-    if (!scroll.value.firstLoad && autoRefresh > 1) {
+    if (!scroll.value.firstLoad) {
       try {
         const accountId = accountStore.currentAccountId
         const allReceive = scroll.value.latestEmail?.allReceive
