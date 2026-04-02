@@ -372,7 +372,9 @@ async function sendEmail() {
       position: 'bottom-right'
     })
 
-    userStore.refreshUserInfo();
+    if (typeof userStore.user.sendCount === 'number') {
+      userStore.user.sendCount += form.receiveEmail.length;
+    }
 
     // 不论成功失败，都把本次收件人沉淀为历史记录，供后续自动补全使用。
     addRecipientRecord();

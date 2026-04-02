@@ -10,10 +10,8 @@ export const useUserStore = defineStore('user', {
     }),
     actions: {
         refreshUserList() {
-            loginUserInfo().then(user => {
-                // 某些场景只需要通知其他组件“用户信息有变化”，不需要整对象替换。
-                this.refreshList ++
-            })
+            // 仅广播“用户列表相关数据已变化”，避免为刷新信号额外请求用户详情。
+            this.refreshList ++
         },
         refreshUserInfo() {
             loginUserInfo().then(user => {

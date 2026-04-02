@@ -640,7 +640,10 @@ function submit() {
       plain: true
     })
     verifyShow.value = false
-    userStore.refreshUserInfo()
+    if (userStore.user?.account && account?.accountId === userStore.user.account.accountId) {
+      userStore.user.account = account
+      userStore.user.name = account.name
+    }
   }).catch(res => {
     if (res.code === 400) {
       verifyToken = ''
